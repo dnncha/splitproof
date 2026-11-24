@@ -1,0 +1,11 @@
+ROADMAP.md
+PLAN.md
+*-PLAN.md
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+*.egg-info/
+.cutsite-cache/
+.pytest_cache/

@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cutsite"
+version = "0.1.0"
+description = "Build, audit and prove leakage-free train/test splits for biological data."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+keywords = [
+  "machine learning",
+  "benchmark",
+  "data leakage",
+  "cross-validation",
+  "bioinformatics",
+  "computational biology",
+  "reproducibility",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = ["numpy>=1.22", "scipy>=1.8", "PyYAML>=6.0"]
+
+[project.optional-dependencies]
+chem = ["rdkit>=2023.3"]
+parquet = ["pyarrow>=12.0"]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+cutsite = "cutsite.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/cutsite/cutsite"
+Issues = "https://github.com/cutsite/cutsite/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cutsite"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
