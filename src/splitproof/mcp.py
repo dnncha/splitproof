@@ -81,7 +81,14 @@ TOOLS: List[Dict[str, Any]] = [
         "Re-prove a certificate against the data and the split. Recomputes the data digest, the "
         "assignment digest and every constraint measurement, and reports which checks failed. "
         "Use this to confirm a split has not drifted since it was certified.",
-        {"cert": STRING, "data": STRING, "split": STRING, "split_column": STRING},
+        {
+            "cert": STRING,
+            "data": STRING,
+            "split": STRING,
+            "split_column": STRING,
+            "require_exact": BOOLEAN,
+            "skip_neighbours": BOOLEAN,
+        },
         ["cert"],
     ),
     _tool(
@@ -186,8 +193,20 @@ def _do_verify(arguments: Dict[str, Any]) -> Dict[str, Any]:
         data_path=_path(arguments.get("data")),
         split_path=_path(arguments.get("split")),
         split_column=arguments.get("split_column"),
+        skip_neighbours=bool(arguments.get("skip_neighbours", False)),
     )
-    return result.to_dict()
+    payload = result.to_dict()
+    unproven = arguments.get("require_exact") and result.status == "satisfied_unproven"
+    payload["ok"] = result.ok and result.status != "violated" and not unproven
+    payload["verified"] = result.ok
+    payload["summary"] = (
+        "the certificate re-derives exactly"
+        if result.ok
+        else "the certificate does not re-derive from this data and split"
+    )
+    if result.ok and result.status == "violated":
+        payload["summary"] += ", and it records a violated constraint"
+    return payload
 
 
 def _do_units(arguments: Dict[str, Any]) -> Dict[str, Any]:

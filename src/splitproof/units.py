@@ -171,7 +171,19 @@ def _signature(data: Dataset, members: Sequence[int]) -> str:
 
 
 def _constraint_id(constraint: SimilarityConstraint) -> str:
-    return f"{constraint.key}:{constraint.metric}@{constraint.threshold:g}"
+    """A key that distinguishes constraints that measure different things.
+
+    Omitting params and backend let two constraints on the same key and threshold
+    share a key, so a clean one silently overwrote a violated one and both reported
+    satisfied.
+    """
+    suffix = ""
+    if constraint.backend:
+        suffix += f"/{constraint.backend}"
+    if constraint.params:
+        settings = ",".join(f"{name}={value}" for name, value in sorted(constraint.params))
+        suffix += f"[{settings}]"
+    return f"{constraint.key}:{constraint.metric}@{constraint.threshold:g}{suffix}"
 
 
 def build(
@@ -303,6 +315,16 @@ def _temporal_pins(
     pins: Dict[int, str] = {}
     dropped: set = set()
     spanning = 0
+    if len(policy.temporal_constraints) > 1:
+        raise PolicyError(
+            f"{len(policy.temporal_constraints)} temporal constraints were declared, and they "
+            "would overwrite each other's placements",
+            remedy=(
+                "Declare one temporal cutoff. Two cutoffs on different date columns can demand "
+                "opposite folds for the same unit, which no assignment satisfies."
+            ),
+            details={"count": len(policy.temporal_constraints)},
+        )
     for constraint in policy.temporal_constraints:
         column = policy.dataset.dates[constraint.key]
         dates = data.dates(column)
@@ -322,8 +344,8 @@ def _temporal_pins(
                     raise PolicyError(
                         "a unit spans the temporal cutoff, so no assignment can satisfy the constraint",
                         remedy=(
-                            "Set on_span to 'test' (conservative), 'train', or 'drop' on the temporal "
-                            "constraint, or move the cutoff."
+                            "Set on_span to 'test' (the conservative choice) or 'drop' on the "
+                            "temporal constraint, or move the cutoff."
                         ),
                         details={
                             "cutoff": constraint.cutoff.isoformat(),

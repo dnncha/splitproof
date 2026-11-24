@@ -43,9 +43,43 @@ Scheduled: none yet (see Holes)
 
 ## Holes, ranked
 
-1. No property test over policy parsing → generate malformed policies and assert every rejection names a `where` locator rather than raising an unhandled error (inner, ~30 min).
-4. No scheduled tier at all → nothing runs mutation testing or a longer scale sweep. Add a weekly GitHub Actions schedule running mutation testing over `evaluate.py` and `assign.py`, red opening an issue (~45 min).
-5. No fuzz over data loading → malformed CSV/FASTA should fail with a `DataError`, never a traceback (inner, ~30 min).
+1. **No real public dataset has been audited.** Every number in the README comes from
+   synthetic families. All three reviewers named this as the thing that decides whether
+   splitproof becomes infrastructure or stays a repo. Dry-run first against messy real
+   benchmarks (MoleculeNet BACE and ClinTox for salts, enantiomers and N-methyl series;
+   TDC ADMET; a protein set such as DeepLoc or PEER), fix whatever they expose, then
+   publish one table per benchmark with the crossing pairs and the similarity baseline
+   beside the published leaderboard score (~1 week).
+2. **`GIANT_UNIT` refuses where the field removes a minimal set of bridge entities.**
+   Single-linkage chaining collapses most real protein and medchem sets into one
+   component at the thresholds people argue for, and the current remedies are "raise the
+   threshold" (choose leakage), `leave-unit-out` (useless when one unit holds most rows)
+   or a wider tolerance. GraphPart and lohi-splitter drop the fewest entities needed.
+   Add an opt-in `--max-drop N|frac` that keeps the zero-crossing guarantee and records
+   the dropped ids in the certificate (~1 day).
+3. **No 2D or bipartite splits.** Interaction datasets (drug-target, TCR-pMHC,
+   antibody-antigen, PPI) need cold-ligand, cold-target and double-cold splits. Naive
+   union-find over two interaction columns collapses the graph. Until it exists, detect
+   the shape and refuse with an explanation rather than returning one giant unit (~2 days
+   for the refusal, longer for the feature).
+4. **No DataFrame API.** Teams work in pandas, Polars, AnnData and HuggingFace Datasets;
+   a YAML-and-CSV round trip is a week-one adoption tax. `audit(df, policy)` and
+   `split(df, policy)` (~1 day).
+5. **No structural similarity.** Claiming coverage of structures without a Foldseek or
+   pocket metric overclaims against PLINDER and PINDER, which showed sequence identity
+   alone leaks badly on 3D data. Either add a structural backend or scope the claim
+   explicitly (~2 days).
+6. **No scheduled tier.** Nothing runs mutation testing or a long scale sweep. Add a
+   weekly GitHub Actions schedule over `evaluate.py`, `assign.py` and `cert.py`, with a
+   red run opening an issue (~45 min).
+7. **MMseqs2 defaults can miss real homology.** `cov_mode 0` at `-c 0.8` cannot see a
+   100%-identical domain inside a multi-domain protein, and the default e-value hides
+   identical short peptides. The parameters are in the policy and the digest now, but the
+   defaults deserve a documented discussion and probably a second recommended profile
+   (~half a day).
+8. **Allocation is greedy, not optimal.** A dataset whose unit sizes pack badly can still
+   miss the requested fractions by more than unit granularity requires, and nothing
+   measures the gap to an optimal packing (~1 h).
 
 ## Escape log
 
@@ -65,6 +99,10 @@ Scheduled: none yet (see Holes)
 | 2026-11-24 | The ring-system backend crashed on 7 of 9 everyday compounds, including indole, caffeine, tryptophan and every nucleobase | my hand-rolled Murcko reduction cleared explicit hydrogens on every surviving ring atom, which strips the mandatory H from pyrrole-type aromatic nitrogen and makes the molecule impossible to kekulise | reimplementing a non-trivial domain algorithm from memory | council review (Gemini 4 Neon) | after two partial fixes the honest conclusion was to stop reimplementing Bemis-Murcko. The metric is now `ring_systems`: the canonical set of ring systems taken as SMILES fragments of the parent molecule, so nothing is edited and nothing needs re-sanitising | `tests/test_chem.py` runs a twelve-compound real-drug panel through the backend, parametrised so each failure names the compound | 7 regression test; above: rungs 1-4 cannot encode which molecules RDKit can kekulise | 2 s | yes: red on the original reduction for indole, imidazole, caffeine, tryptophan, serotonin, adenine and guanine; green across all seventeen compounds tested |
 | 2026-11-24 | A group or site literally named NA, None or Null was silently unconstrained, and the split still certified clean | the loader treated the strings NA, NAN, NONE and NULL as missing. In biology NA is North America, neuraminidase, sodium and the Asn-Ala dipeptide; None is the unperturbed arm of a screen; Null is a knockout genotype | a convenience default that silently discards real data | council review (Gemini 4 Neon) | only an empty or whitespace-only cell is missing now | `tests/test_dataset_properties.py` asserts those spellings survive, and an audit where two sites named NA and None straddle folds is caught as violated | 2 deleted path | 1 s | yes: the NA-and-None audit reports violated where it previously reported satisfied |
 | 2026-11-24 | Five more ways to certify a leaking split clean: an all-blank group or date column, a temporal audit whose fold column said Train rather than train, on_span train pinning post-cutoff rows into the fold the rule forbids, a split file covering only part of the data, and float32 arithmetic hiding an exact 7/10 Jaccard from the diagnostics | vacuity was only ever checked for similarity keys; the temporal check never confirmed the fold it guards exists; on_span train contradicted the one-directional rule; a partial split file was silently treated as drops; and similarity was computed in float32 while thresholds are float64 | a constraint that cannot bind, reported as satisfied, recurring across every constraint kind | council review (Gemini 4 Neon) | each case refuses or is computed exactly: vacuity covers groups and dates, the temporal check names the folds it found, on_span train is gone, partial split files are refused, and similarity is float64 | `tests/test_soundness.py` covers all five, and `evaluate` reports items_checked so a vacuous pass is visible | 2 deleted path | 2 s | yes: each reproduced on the pre-fix code and each now refuses with a named code |
+| 2026-11-24 | Verifying an untrusted certificate executed an arbitrary program of its author's choosing | `params` on a similarity constraint was passed straight into the backend constructor as keyword arguments, and `MMseqs2Identity` takes `binary`. `verify` builds backends from the policy embedded in the certificate it is checking, so the certificate chose the program | untrusted input reaching a process boundary, in the one command whose whole purpose is inspecting other people's artifacts | council review round 2 (Gemini 4 Neon) | each backend now declares `policy_params`, a per-name allowlist with a type and a range, and `construct` refuses anything else. No parameter that could name a program or a path is settable from a policy | the allowlist in `construct`, plus a test that a policy naming `binary` is refused and that the name is absent from the accepted list | 1 impossible | 1 s | yes: the proof-of-concept certificate wrote its marker file before the fix (PAYLOAD EXECUTED: True) and is refused after (False), with legitimate params still accepted and range-checked |
+| 2026-11-24 | Six more ways to certify a leaking split clean: a blank cell in the fold column, the internal `__dropped__` sentinel passed as a fold, a split putting everything in one fold, a split file naming one id twice, two constraints colliding on one id, and near-duplicate molecules keyed apart | each silently removed rows or constraints from the measurement and graded what was left. The `--split` coverage fix from round 1 had missed `--split-column`; `_constraint_id` omitted `params`; and the ring key was taken from the parent molecule's own SMILES, so N-methylindole, theophylline, pyridinium, an enantiomer and a tosylate salt were all distinct classes | a measurement that silently narrows its own scope | council review round 2 (Gemini 4 Neon) | `check_audit_folds` refuses blank folds, the reserved sentinel and single-fold splits; duplicate ids in a split file are refused; `_constraint_id` includes backend and params; the ring key uses element and aromaticity only, over the largest covalent fragment with stereochemistry removed | `check_audit_folds` plus parametrised tests in `tests/test_soundness.py` and six equivalence pairs in `tests/test_chem.py` | 2 deleted path | 2 s | yes: each of the six reproduced on the pre-fix code; the chemistry pairs now group and benzene still separates from pyridine |
+| 2026-11-24 | A freshly built split failed verification against its own certificate once it had more than ten folds, and every violated certificate failed verification on row-permuted data | `assign` created folds in integer order while the fold column was read back lexicographically, so `unit10` sorted before `unit2`. Separately, the `examples` list in every violation path was ordered by row index, which the data digest is deliberately invariant to | an artifact field that is not a function of the content it is supposed to describe | council review round 2 (Gemini 4 Neon) | fold names sort naturally, and examples are ordered and oriented by entity id across the similarity, equivalence-class and temporal paths | `tests/test_soundness.py` verifies a 14-unit and a 12-fold split against their own certificates and compares audit examples across a row shuffle | 7 regression test; above: rungs 1-4 cannot express "this field is invariant to input permutation" | 2 s | yes: red on the pre-fix code for both, green after |
+| 2026-11-24 | The k-fold diagnostics fix from the previous round was unreachable dead code, and a boolean passed verification where a number was expected | `reference_fold` still returned the largest fold when no `train` existed, so the `held_out_against_rest` branch could never run. And in Python `isinstance(True, int)` holds and `True == 1`, so editing a count to `true` compared equal | a fix whose guard condition can never be true, and equality that ignores type | council review round 2 (Gemini 4 Neon) | `reference_fold` returns None when there is no `train` fold, so cross-validation really compares each fold against the rest; certificate comparison now requires matching types, with ints and floats the only permitted mix | a test asserting verification rejects a boolean swapped for a number and that `verify --json` reports the constraints it re-measured | 5 assertion; above: no type system here distinguishes a measured count from a boolean inside parsed JSON | 1 s | yes: both reproduced before the fix |
 Runs names what triggers each signal: `compiler`, `hook`, `inner`, `gate`, `release`, `live`, or `scheduled: <scheduler, cadence, where red goes>`.
 
 Rung is the prevention ladder in dragnet's escapes.md: 1 impossible, 2 deleted path, 3 rule, 4 sweep, 5 assertion, 6 property or fuzz, 7 regression test, 8 production.

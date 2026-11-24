@@ -34,18 +34,30 @@ def _rdkit():
 
 
 def ring_systems(chemistry, molecule) -> Optional[str]:
-    """The molecule's ring systems, canonicalised and sorted, joined by '|'.
+    """A canonical key for the molecule's ring skeleton, or None if it has no rings.
 
-    Fused rings are merged into one system, then each system is written as a
-    canonical SMILES fragment of the parent molecule, so nothing is edited and
-    nothing needs re-sanitising. Returns None for a molecule with no rings.
+    Salts and solvates are reduced to the largest covalent fragment. Fused rings are
+    merged into one system, and each system is written as a canonical SMILES fragment
+    of the parent molecule using element and aromaticity only, so the key ignores
+    stereochemistry, formal charge, isotope and hydrogen count. Nothing is edited, so
+    there is no re-sanitising and no kekulisation to break.
 
-    This is not the Bemis-Murcko scaffold: linkers between ring systems are not
-    kept, so it groups more molecules together than a Murcko scaffold would. That
-    is the safe direction for a split, and it is why the metric is called
-    ring_systems rather than scaffold. RDKit's own MurckoScaffoldSmiles is not
-    used because MurckoDecompose raises on every input in RDKit 2026.09.
+    That makes the key deliberately coarse. Indole and N-methylindole share it, so do
+    caffeine and theophylline, adenine and 9-methyladenine, pyridine and pyridinium,
+    a pair of enantiomers, and a drug and its tosylate salt. Grouping those together
+    is the safe direction for a split: it never lets a near-duplicate cross folds.
+    Benzene and pyridine stay apart, because their elements differ.
+
+    It is not the Bemis-Murcko scaffold, which keeps inter-ring linkers and
+    distinguishes all of the above, and it is not computed with RDKit's
+    MurckoScaffoldSmiles, whose MurckoDecompose raises on every input in RDKit
+    2026.09.
     """
+    fragments = chemistry.GetMolFrags(molecule, asMols=True, sanitizeFrags=False)
+    if len(fragments) > 1:
+        molecule = max(fragments, key=lambda fragment: fragment.GetNumHeavyAtoms())
+    chemistry.FastFindRings(molecule)
+    chemistry.RemoveStereochemistry(molecule)
     info = molecule.GetRingInfo()
     if info.NumRings() == 0:
         return None
@@ -57,9 +69,19 @@ def ring_systems(chemistry, molecule) -> Optional[str]:
         for existing in overlapping:
             current |= existing
         systems.append(current)
+    symbols = [
+        f"[{atom.GetSymbol().lower() if atom.GetIsAromatic() else atom.GetSymbol()}]"
+        for atom in molecule.GetAtoms()
+    ]
     return "|".join(
         sorted(
-            chemistry.MolFragmentToSmiles(molecule, atomsToUse=sorted(system), canonical=True)
+            chemistry.MolFragmentToSmiles(
+                molecule,
+                atomsToUse=sorted(system),
+                atomSymbols=symbols,
+                canonical=True,
+                isomericSmiles=False,
+            )
             for system in systems
         )
     )
@@ -86,6 +108,7 @@ class MorganTanimoto(_ChemBackend):
     name = "tanimoto"
     metric = "tanimoto"
     exactness = EXACT
+    policy_params = {"radius": (int, 0, 8), "bits": (int, 32, 65536)}
 
     def __init__(self, radius: int = RADIUS_DEFAULT, bits: int = BITS_DEFAULT):
         self.radius = radius

@@ -90,6 +90,7 @@ class ExactJaccard(SimilarityBackend):
     name = "exact_jaccard"
     metric = "kmer_jaccard"
     exactness = EXACT
+    policy_params = {"k": (int, 1, 64)}
 
     def __init__(self, k: Optional[int] = None):
         self.k = k
@@ -212,6 +213,11 @@ class MinHashJaccard(SimilarityBackend):
     name = "minhash"
     metric = "kmer_jaccard"
     exactness = LOWER_BOUND
+    policy_params = {
+        "k": (int, 1, 64),
+        "num_perm": (int, 16, 4096),
+        "seed": (int, 0, 2**31 - 1),
+    }
 
     def __init__(self, num_perm: int = 128, seed: int = 7, k: Optional[int] = None):
         self.num_perm = num_perm
@@ -291,7 +297,6 @@ class MinHashJaccard(SimilarityBackend):
         bands, rows = self._bands(threshold)
         signatures, token_sets, missing = self._signatures(values, k)
         candidates: set = set()
-        considered = 0
         for band in range(bands):
             buckets: Dict[bytes, List[int]] = {}
             lo, hi = band * rows, (band + 1) * rows
@@ -302,11 +307,10 @@ class MinHashJaccard(SimilarityBackend):
             for members in buckets.values():
                 if len(members) < 2:
                     continue
-                considered += len(members) * (len(members) - 1) // 2
-                guard_candidate_budget(considered, max_pairs, self.name, threshold)
                 for a_pos in range(len(members)):
                     for b_pos in range(a_pos + 1, len(members)):
                         candidates.add((members[a_pos], members[b_pos]))
+                guard_candidate_budget(len(candidates), max_pairs, self.name, threshold)
         collector = PairCollector(self.name, threshold, max_pairs)
         for i, j in sorted(candidates):
             left, right = token_sets[i], token_sets[j]

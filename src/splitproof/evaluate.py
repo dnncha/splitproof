@@ -76,7 +76,7 @@ def _check_similarity(
         "cross_fold_pairs_at_or_above_threshold": count,
         "cross_fold_pairs_by_fold_pair": by_pair,
         "max_cross_fold_similarity": round(worst, 6) if worst is not None else None,
-        "values_absent": len(result.missing) if result else 0,
+        "values_absent": (len(result.missing) - len(result.unparsable)) if result else 0,
         "values_unparsable": len(result.unparsable) if result else 0,
         "exactness": result.exactness if result else "unknown",
         "backend": result.backend if result else "unknown",
@@ -136,7 +136,8 @@ def _crossing_classes(
     """
     histogram: Dict[str, Dict[str, int]] = {}
     witness: Dict[str, Dict[str, int]] = {}
-    for index, label in enumerate(result.groups):
+    for index in sorted(range(len(result.groups)), key=lambda i: data.ids[i]):
+        label = result.groups[index]
         if label is None:
             continue
         fold = assignment.fold_of.get(index, DROPPED)
@@ -148,7 +149,8 @@ def _crossing_classes(
     crossing = 0
     by_pair: Dict[str, int] = {}
     examples: List[Tuple[int, int, float]] = []
-    for label, folds in histogram.items():
+    for label in sorted(histogram):
+        folds = histogram[label]
         size = sum(folds.values())
         total += size * (size - 1) // 2
         within = sum(count * (count - 1) // 2 for count in folds.values())
@@ -194,8 +196,17 @@ def _crossing(
     positions = np.flatnonzero(crossing)
     crossing_sims = sims[positions]
     worst = float(crossing_sims.max())
-    top = positions[np.argsort(-crossing_sims, kind="stable")[:MAX_EXAMPLES]]
-    examples = [(int(rows[p]), int(cols[p]), float(sims[p])) for p in top]
+    identity = {index: data.ids[index] for index in range(len(data))}
+    ranked = sorted(
+        positions.tolist(),
+        key=lambda p: (-float(sims[p]), identity[int(rows[p])], identity[int(cols[p])]),
+    )[:MAX_EXAMPLES]
+    examples = []
+    for p in ranked:
+        left_index, right_index = int(rows[p]), int(cols[p])
+        if identity[right_index] < identity[left_index]:
+            left_index, right_index = right_index, left_index
+        examples.append((left_index, right_index, float(sims[p])))
     names = list(assignment.folds)
     by_pair: Dict[str, int] = {}
     pair_left, pair_right = left[positions], right[positions]
@@ -291,7 +302,7 @@ def _check_temporal(
             "items_without_a_date": missing,
             "on_span": constraint.on_span,
         },
-        examples=wrong_side[:MAX_EXAMPLES],
+        examples=sorted(wrong_side, key=lambda item: item["id"])[:MAX_EXAMPLES],
         notes=(
             [f"{missing} items have no date and were left where the scheme put them"] if missing else []
         ),
@@ -299,11 +310,13 @@ def _check_temporal(
 
 
 def reference_fold(assignment: Assignment) -> Optional[str]:
-    if "train" in assignment.folds:
-        return "train"
-    if not assignment.stats:
-        return None
-    return max(assignment.stats, key=lambda stat: stat.count).name
+    """The fold held-out items are compared against, or None for cross-validation.
+
+    Returning the largest fold when there is no 'train' made the cross-validation
+    branch in diagnostics() unreachable, so a k-fold run compared every fold against
+    one arbitrary fold instead of against the rest.
+    """
+    return "train" if "train" in assignment.folds else None
 
 
 

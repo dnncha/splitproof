@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Tuple
 
 from .dataset import Dataset
+from .errors import DataError
 from .errors import GiantUnit, InfeasibleSplit
 from .policy import Policy
 from .units import Unit, UnitGraph
@@ -316,6 +318,59 @@ def describe(policy: Policy, data: Dataset, assignment: Assignment, graph: UnitG
     return stats
 
 
+def fold_order(name: str) -> Tuple[Any, ...]:
+    """Natural ordering, so fold2 sorts before fold10.
+
+    assign() creates folds in integer order while a fold column is read back
+    lexicographically, which made a split fail verification against its own
+    certificate once there were more than ten folds.
+    """
+    parts = re.split(r"(\d+)", name)
+    return tuple(int(part) if part.isdigit() else part for part in parts)
+
+
+def check_audit_folds(data: Dataset, fold_of: Dict[int, str], source: str) -> None:
+    """An audited split must say where every entity went.
+
+    Each of these silently excluded rows from every check and still certified the
+    rest clean: a blank cell, the internal __dropped__ sentinel, and a split with
+    only one fold (which trivially has no crossing pairs).
+    """
+    blank = sorted(data.ids[i] for i, fold in fold_of.items() if fold == DROPPED)
+    if blank:
+        raise DataError(
+            f"{len(blank)} entities have no fold in {source}",
+            remedy=(
+                "Every entity needs a fold, or the audit would grade only the rows that have "
+                "one and report the rest as clean. Fill them in, or remove those rows."
+            ),
+            details={"missing": len(blank), "examples": blank[:10]},
+        )
+    reserved = sorted(data.ids[i] for i, fold in fold_of.items() if fold == DROPPED)
+    folds = {fold for fold in fold_of.values()}
+    if "" in folds:
+        raise DataError(
+            f"{source} contains an empty fold name",
+            remedy="Fold names must be non-empty.",
+            details={"folds": sorted(folds)},
+        )
+    if len(folds) < 2:
+        raise DataError(
+            f"{source} puts every entity in one fold ({sorted(folds)})",
+            remedy=(
+                "A single fold has no pairs that cross it, so every constraint would pass "
+                "without measuring anything. An audit needs at least two folds."
+            ),
+            details={"folds": sorted(folds), "entities": len(data)},
+        )
+    if reserved:
+        raise DataError(
+            f"{source} uses the reserved fold name {DROPPED!r}",
+            remedy="That name is internal to splitproof. Rename the fold.",
+            details={"examples": reserved[:10]},
+        )
+
+
 def from_column(data: Dataset, column: str) -> Assignment:
     values = data.column(column)
     fold_of: Dict[int, str] = {}
@@ -324,10 +379,10 @@ def from_column(data: Dataset, column: str) -> Assignment:
         fold = value if value is not None else DROPPED
         fold_of[i] = fold
         counts[fold] = counts.get(fold, 0) + 1
-    folds = sorted(name for name in counts if name != DROPPED)
+    check_audit_folds(data, fold_of, f"column '{column}'")
+    folds = sorted((name for name in counts if name != DROPPED), key=fold_order)
     stats = [
         FoldStat(name=name, target=counts[name], count=counts[name], units=0, label_counts={})
         for name in folds
     ]
-    dropped = [i for i, fold in fold_of.items() if fold == DROPPED]
-    return Assignment(fold_of=fold_of, folds=folds, stats=stats, dropped=dropped)
+    return Assignment(fold_of=fold_of, folds=folds, stats=stats, dropped=[])

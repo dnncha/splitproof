@@ -165,12 +165,26 @@ def first_difference(stored: Any, fresh: Any, path: str = "") -> Optional[str]:
             if deeper:
                 return deeper
         return None
+    if type(stored) is not type(fresh) and not (
+        isinstance(stored, (int, float))
+        and isinstance(fresh, (int, float))
+        and not isinstance(stored, bool)
+        and not isinstance(fresh, bool)
+    ):
+        return (
+            f"{path or 'value'}: certificate says {stored!r} ({type(stored).__name__}), "
+            f"recomputed {fresh!r} ({type(fresh).__name__})"
+        )
     if stored != fresh:
         return f"{path or 'value'}: certificate says {stored!r}, recomputed {fresh!r}"
     return None
 
 
-def verify(certificate: Dict[str, Any], recomputed: Dict[str, Any]) -> VerifyResult:
+def verify(
+    certificate: Dict[str, Any],
+    recomputed: Dict[str, Any],
+    reports: Optional[List[ConstraintReport]] = None,
+) -> VerifyResult:
     """Compare a stored certificate against one rebuilt from the data and the split.
 
     Everything the certificate asserts is recomputed and compared, not just the
@@ -206,5 +220,5 @@ def verify(certificate: Dict[str, Any], recomputed: Dict[str, Any]) -> VerifyRes
         ok=all(check["ok"] for check in checks),
         checks=checks,
         status=str(fresh.get("status", "unknown")),
-        reports=[],
+        reports=list(reports or []),
     )

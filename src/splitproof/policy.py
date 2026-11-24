@@ -40,6 +40,11 @@ def _as_int(value: Any, where: str) -> int:
             f"{where} must be a whole number, got {type(value).__name__}",
             details={"where": where, "value": str(value)},
         )
+    if isinstance(value, float) and (value != value or value in {float("inf"), float("-inf")}):
+        raise PolicyError(
+            f"{where} must be a finite whole number, got {value!r}",
+            details={"where": where, "value": str(value)},
+        )
     if isinstance(value, float) and value != int(value):
         raise PolicyError(
             f"{where} must be a whole number, got {value!r}",
@@ -409,7 +414,14 @@ class Policy:
 
     @staticmethod
     def load(path: Path) -> "Policy":
-        text = Path(path).read_text(encoding="utf-8")
+        try:
+            text = Path(path).read_text(encoding="utf-8")
+        except OSError as exc:
+            raise PolicyError(
+                f"could not read the policy at {path}",
+                remedy="Check the path. 'splitproof init <data>' writes a starter policy.",
+                details={"path": str(path), "reason": str(exc)},
+            ) from exc
         return Policy.from_dict(_parse_structured(text, path), source_path=Path(path))
 
 
@@ -418,7 +430,14 @@ def _parse_structured(text: str, path: Path) -> Dict[str, Any]:
     if suffix == ".json":
         import json
 
-        return json.loads(text)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise PolicyError(
+                f"policy file {path} is not valid JSON",
+                remedy="Fix the syntax. The error below names the position.",
+                details={"path": str(path), "reason": str(exc)},
+            ) from exc
     try:
         import yaml
     except ModuleNotFoundError as exc:
@@ -426,7 +445,14 @@ def _parse_structured(text: str, path: Path) -> Dict[str, Any]:
             "reading a YAML policy needs PyYAML",
             remedy="Install splitproof normally (pip install splitproof) or use a .json policy.",
         ) from exc
-    loaded = yaml.safe_load(text)
+    try:
+        loaded = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise PolicyError(
+            f"policy file {path} is not valid YAML",
+            remedy="Fix the syntax. The error below names the line.",
+            details={"path": str(path), "reason": str(exc)},
+        ) from exc
     if loaded is None:
         raise PolicyError(f"policy file {path} is empty")
     return loaded

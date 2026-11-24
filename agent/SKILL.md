@@ -19,7 +19,7 @@ split that honours the declaration, and it writes a certificate anyone can re-ve
 - **On arrival** of any benchmark split you did not build yourself. Audit it before you
   trust a single number from it.
 - **When a score looks too good.** Compare it against the nearest-neighbour baseline that
-  `splitproof audit` reports. That is the floor; a model below or near it has learned nothing.
+  `splitproof audit` reports. Report it beside any model score: similarity reasoning is a legitimate model, so it is neither a floor nor a ceiling.
 - **In CI**, so a split cannot drift without the build going red.
 
 Do not use it for splitting data whose rows genuinely are independent and exchangeable.

@@ -66,14 +66,14 @@ def test_a_late_item_in_train_is_the_only_temporal_violation(tmp_path: Path):
     rows = make_rows(families=8, members=2, seed=22)
     for position, row in enumerate(rows):
         row["deposited"] = "2025-06-15" if position % 2 else "2024-06-15"
-        row["fold"] = "train"
-    path = write_csv(tmp_path / "all-train.csv", rows)
+        row["fold"] = "train" if position < len(rows) - 2 else "test"
+    path = write_csv(tmp_path / "late-in-train.csv", rows)
     payload = _policy(path)
     payload["constraints"] = [{"kind": "temporal", "key": "deposited", "cutoff": "2025-01-01"}]
     outcome = api.audit(Policy.from_dict(payload), split_column="fold", skip_neighbours=True)
     temporal = outcome.reports[0]
     assert temporal.status == VIOLATED
-    assert temporal.measured["items_after_the_cutoff_in_train"] == 8
+    assert temporal.measured["items_after_the_cutoff_in_train"] == 7
     assert all("on or after the cutoff" in example["problem"] for example in temporal.examples)
 
 
@@ -94,16 +94,16 @@ def test_a_temporal_audit_refuses_a_split_without_the_guarded_fold(tmp_path: Pat
     from splitproof.errors import VacuousConstraint
 
     rows = make_rows(families=6, members=2, seed=24)
-    for row in rows:
+    for position, row in enumerate(rows):
         row["deposited"] = "2025-06-15"
-        row["fold"] = "Train"
+        row["fold"] = "Train" if position % 2 else "Test"
     path = write_csv(tmp_path / "capitalised.csv", rows)
     payload = _policy(path)
     payload["constraints"] = [{"kind": "temporal", "key": "deposited", "cutoff": "2025-01-01"}]
     with pytest.raises(VacuousConstraint) as error:
         api.audit(Policy.from_dict(payload), split_column="fold", skip_neighbours=True)
     assert error.value.details["guards"] == "train"
-    assert error.value.details["folds"] == ["Train"]
+    assert error.value.details["folds"] == ["Test", "Train"]
 
 
 def test_on_span_train_is_refused_as_self_contradictory(tmp_path: Path):
@@ -224,3 +224,168 @@ def test_an_unknown_backend_parameter_is_refused(tmp_path: Path):
     with pytest.raises(BackendUnavailable) as error:
         api.make_split(Policy.from_dict(payload))
     assert "accepted" in error.value.details
+
+
+def _certify(tmp_path: Path, payload, name: str):
+    from splitproof import cert as cert_module
+
+    outcome = api.make_split(Policy.from_dict(payload))
+    split_path = tmp_path / f"{name}.split.csv"
+    cert_path = tmp_path / f"{name}.cert.json"
+    api.write_split(split_path, outcome.data, outcome.assignment, "accession")
+    cert_module.write(cert_path, outcome.certificate)
+    return outcome, split_path, cert_path
+
+
+@pytest.mark.parametrize(
+    "scheme", [{"kind": "leave-unit-out"}, {"kind": "kfold", "folds": 12}]
+)
+def test_a_split_with_more_than_ten_folds_verifies_against_itself(tmp_path: Path, scheme):
+    """Folds were created in integer order and read back lexicographically.
+
+    With eleven or more folds, unit10 sorted before unit2, so a freshly built split
+    failed verification against its own certificate.
+    """
+    rows = make_rows(families=14, members=3, seed=71)
+    payload = _policy(write_csv(tmp_path / "many.csv", rows), scheme=scheme)
+    payload["constraints"] = [
+        {"kind": "similarity", "key": "sequence", "metric": "kmer_jaccard", "threshold": 0.3}
+    ]
+    _outcome, split_path, cert_path = _certify(tmp_path, payload, "many")
+    result = api.verify(cert_path, split_path=split_path)
+    assert result.ok, [check for check in result.checks if not check["ok"]]
+
+
+def test_verify_rejects_a_boolean_swapped_for_a_number(tmp_path: Path):
+    import json
+
+    rows = make_rows(families=10, members=3, seed=72)
+    payload = _policy(write_csv(tmp_path / "b.csv", rows))
+    payload["constraints"] = [
+        {"kind": "similarity", "key": "sequence", "metric": "kmer_jaccard", "threshold": 0.3}
+    ]
+    _outcome, split_path, cert_path = _certify(tmp_path, payload, "b")
+    certificate = json.loads(cert_path.read_text(encoding="utf-8"))
+    certificate["units"]["singleton_units"] = True
+    cert_path.write_text(json.dumps(certificate), encoding="utf-8")
+    result = api.verify(cert_path, split_path=split_path)
+    assert not result.ok
+    assert result.to_dict()["constraints"], "verify must report the constraints it re-measured"
+
+
+def test_row_order_does_not_change_the_reported_examples(tmp_path: Path):
+    import random
+
+    rows = make_rows(families=10, members=4, seed=73)
+    for position, row in enumerate(rows):
+        row["fold"] = "train" if position % 2 else "test"
+    shuffled = list(rows)
+    random.Random(3).shuffle(shuffled)
+
+    def examples_for(ordered, name):
+        payload = _policy(write_csv(tmp_path / name, ordered))
+        outcome = api.audit(
+            Policy.from_dict(payload), split_column="fold", skip_neighbours=True
+        )
+        return [
+            (example["a"], example["b"], example["similarity"])
+            for example in outcome.reports[0].examples
+        ]
+
+    assert examples_for(rows, "plain.csv") == examples_for(shuffled, "shuffled.csv")
+
+
+def test_two_constraints_on_the_same_key_do_not_overwrite_each_other(tmp_path: Path):
+    rows = make_rows(families=10, members=3, seed=74)
+    payload = _policy(write_csv(tmp_path / "two.csv", rows))
+    payload["constraints"] = [
+        {
+            "kind": "similarity",
+            "key": "sequence",
+            "metric": "kmer_jaccard",
+            "threshold": 0.1,
+            "params": {"k": 3},
+        },
+        {
+            "kind": "similarity",
+            "key": "sequence",
+            "metric": "kmer_jaccard",
+            "threshold": 0.1,
+            "params": {"k": 12},
+        },
+    ]
+    outcome = api.make_split(Policy.from_dict(payload))
+    identifiers = [report.id for report in outcome.reports]
+    assert len(set(identifiers)) == 2, identifiers
+    assert len(outcome.certificate["units"]["similarity"]) == 2
+
+
+def test_more_than_one_temporal_constraint_is_refused(tmp_path: Path):
+    rows = make_rows(families=6, members=2, seed=75)
+    for row in rows:
+        row["deposited"] = "2024-06-15"
+        row["released"] = "2025-06-15"
+    path = write_csv(tmp_path / "two-dates.csv", rows)
+    payload = _policy(path)
+    payload["dataset"]["dates"] = {"deposited": "deposited", "released": "released"}
+    payload["constraints"] += [
+        {"kind": "temporal", "key": "deposited", "cutoff": "2025-01-01"},
+        {"kind": "temporal", "key": "released", "cutoff": "2025-01-01"},
+    ]
+    with pytest.raises(PolicyError) as error:
+        api.make_split(Policy.from_dict(payload))
+    assert "overwrite each other" in error.value.message
+
+
+@pytest.mark.parametrize(
+    "fold_values,fragment",
+    [
+        (["train", "", "test", "train"], "no fold"),
+        (["train", "train", "train", "train"], "one fold"),
+    ],
+)
+def test_an_audit_refuses_a_split_column_that_cannot_be_graded(tmp_path: Path, fold_values, fragment):
+    from splitproof.errors import DataError
+
+    rows = make_rows(families=2, members=2, seed=76)
+    for row, value in zip(rows, fold_values):
+        row["fold"] = value
+    path = write_csv(tmp_path / "bad-folds.csv", rows)
+    with pytest.raises(DataError) as error:
+        api.audit(Policy.from_dict(_policy(path)), split_column="fold", skip_neighbours=True)
+    assert fragment in error.value.message
+
+
+def test_a_split_file_assigning_one_id_twice_is_refused(tmp_path: Path):
+    from splitproof.errors import DataError
+
+    rows = make_rows(families=4, members=2, seed=77)
+    path = write_csv(tmp_path / "dupe.csv", rows)
+    data_ids = [row["accession"] for row in rows]
+    split = tmp_path / "dupe.split.csv"
+    lines = ["accession,fold"] + [f"{entity},train" for entity in data_ids]
+    lines.append(f"{data_ids[0]},test")
+    split.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with pytest.raises(DataError) as error:
+        api.audit(Policy.from_dict(_policy(path)), split_path=split, skip_neighbours=True)
+    assert "more than one fold" in error.value.message
+
+
+def test_a_policy_cannot_name_an_executable_for_a_backend(tmp_path: Path):
+    from splitproof.errors import BackendUnavailable
+
+    rows = make_rows(families=4, members=2, seed=78)
+    payload = _policy(write_csv(tmp_path / "rce.csv", rows))
+    payload["constraints"] = [
+        {
+            "kind": "similarity",
+            "key": "sequence",
+            "metric": "identity",
+            "threshold": 0.3,
+            "params": {"binary": "/bin/sh"},
+        }
+    ]
+    with pytest.raises(BackendUnavailable) as error:
+        api.make_split(Policy.from_dict(payload))
+    assert "binary" in error.value.details["given"]
+    assert "binary" not in error.value.details["accepted"]

@@ -153,7 +153,7 @@ def verify(
         backend_overrides=backend_overrides,
     )
     recomputed = cert_module.build(policy, data, graph, assignment, reports, diagnostics)
-    return cert_module.verify(certificate, recomputed)
+    return cert_module.verify(certificate, recomputed, reports)
 
 
 def load_assignment(
@@ -182,14 +182,27 @@ def _from_split_file(data: Dataset, path: Path) -> Assignment:
         rows = [row for row in reader if row and any(cell.strip() for cell in row)]
     if not rows:
         raise DataError(f"split file {path} is empty")
-    start = 1 if rows[0][:2] and rows[0][1].strip().lower() in {"fold", "split", "set"} else 0
-    for row in rows[start:]:
+    header = len(rows[0]) > 1 and rows[0][1].strip().lower() in {"fold", "split", "set"}
+    duplicates: List[str] = []
+    for row in rows[1 if header else 0 :]:
         if len(row) < 2:
             raise DataError(
                 f"split file {path} needs two columns: id,fold",
                 details={"path": str(path), "row": row},
             )
-        mapping[row[0].strip()] = row[1].strip()
+        entity, fold = row[0].strip(), row[1].strip()
+        if entity in mapping and mapping[entity] != fold:
+            duplicates.append(entity)
+        mapping[entity] = fold
+    if duplicates:
+        raise DataError(
+            f"split file {path} assigns {len(duplicates)} ids to more than one fold",
+            remedy=(
+                "An id in two folds is not a split. The later row silently won, and the audit "
+                "graded only that one."
+            ),
+            details={"examples": sorted(set(duplicates))[:10]},
+        )
     known = set(data.ids)
     unknown = sorted(set(mapping) - known)
     if unknown:
@@ -215,10 +228,10 @@ def _from_split_file(data: Dataset, path: Path) -> Assignment:
         fold = mapping.get(entity_id, DROPPED)
         fold_of[i] = fold
         counts[fold] = counts.get(fold, 0) + 1
-    folds = sorted(name for name in counts if name != DROPPED)
+    assign_module.check_audit_folds(data, fold_of, f"split file {path.name}")
+    folds = sorted((name for name in counts if name != DROPPED), key=assign_module.fold_order)
     stats = [FoldStat(name=name, target=counts[name], count=counts[name], units=0) for name in folds]
-    dropped = [i for i, fold in fold_of.items() if fold == DROPPED]
-    return Assignment(fold_of=fold_of, folds=folds, stats=stats, dropped=dropped)
+    return Assignment(fold_of=fold_of, folds=folds, stats=stats, dropped=[])
 
 
 def write_split(path: Path, data: Dataset, assignment: Assignment, id_column: str) -> None:

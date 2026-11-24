@@ -37,7 +37,7 @@ class PairSet:
     @classmethod
     def empty(cls) -> "PairSet":
         return cls(
-            np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64), np.empty(0, dtype=np.float32)
+            np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64), np.empty(0, dtype=np.float64)
         )
 
     @classmethod
@@ -47,7 +47,7 @@ class PairSet:
             return cls.empty()
         rows = np.fromiter((item[0] for item in materialised), dtype=np.int64, count=len(materialised))
         cols = np.fromiter((item[1] for item in materialised), dtype=np.int64, count=len(materialised))
-        sims = np.fromiter((item[2] for item in materialised), dtype=np.float32, count=len(materialised))
+        sims = np.fromiter((item[2] for item in materialised), dtype=np.float64, count=len(materialised))
         return cls(rows, cols, sims).sorted()
 
     @classmethod
@@ -128,7 +128,11 @@ class PairCollector:
             return
         self._charge(int(rows.size))
         self._blocks.append(
-            (rows.astype(np.int64, copy=False), cols.astype(np.int64, copy=False), sims.astype(np.float32, copy=False))
+            (
+                rows.astype(np.int64, copy=False),
+                cols.astype(np.int64, copy=False),
+                sims.astype(np.float64, copy=False),
+            )
         )
 
     def add(self, left: int, right: int, similarity: float) -> None:
@@ -141,7 +145,7 @@ class PairCollector:
                 (
                     np.fromiter((t[0] for t in self._triples), dtype=np.int64, count=len(self._triples)),
                     np.fromiter((t[1] for t in self._triples), dtype=np.int64, count=len(self._triples)),
-                    np.fromiter((t[2] for t in self._triples), dtype=np.float32, count=len(self._triples)),
+                    np.fromiter((t[2] for t in self._triples), dtype=np.float64, count=len(self._triples)),
                 )
             )
             self._triples = []
@@ -229,6 +233,7 @@ class SimilarityBackend:
     metric = "abstract"
     exactness = LOWER_BOUND
     emits = "pairs"
+    policy_params: Dict[str, Tuple[type, Any, Any]] = {}
 
     def version(self) -> str:
         raise NotImplementedError
@@ -291,25 +296,53 @@ def backend_table() -> Dict[str, type]:
 
 
 def construct(cls, settings: Dict[str, Any]):
-    if not settings:
-        return cls()
-    try:
-        return cls(**settings)
-    except TypeError as exc:
-        import inspect
+    """Build a backend from policy params, which are untrusted input.
 
-        accepted = sorted(
-            name
-            for name, parameter in inspect.signature(cls.__init__).parameters.items()
-            if name != "self"
-            and parameter.kind
-            not in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
-        )
+    A certificate carries its own policy and `verify` instantiates backends from it,
+    so anything reachable here is reachable by whoever wrote the certificate. Only
+    the names a backend lists in policy_params are accepted, and each is range
+    checked. Executable paths are deliberately not among them.
+    """
+    allowed = dict(getattr(cls, "policy_params", {}) or {})
+    name = getattr(cls, "name", cls.__name__)
+    unknown = sorted(set(settings) - set(allowed))
+    if unknown:
         raise BackendUnavailable(
-            f"backend {getattr(cls, 'name', cls.__name__)!r} does not accept those params",
-            remedy=f"It accepts {accepted}.",
-            details={"given": sorted(settings), "accepted": accepted},
-        ) from exc
+            f"backend {name!r} does not take {unknown} from a policy",
+            remedy=(
+                f"It takes {sorted(allowed)}. Parameters that could name a program or a path "
+                "are never settable from a policy, because verifying a certificate would then "
+                "run whatever its author chose."
+            ),
+            details={"backend": name, "given": sorted(settings), "accepted": sorted(allowed)},
+        )
+    checked: Dict[str, Any] = {}
+    for key, value in settings.items():
+        kind, low, high = allowed[key]
+        if kind is int and isinstance(value, bool):
+            raise BackendUnavailable(
+                f"{name}.{key} must be a whole number, got a boolean",
+                details={"backend": name, "param": key},
+            )
+        try:
+            coerced = kind(value)
+        except (TypeError, ValueError) as exc:
+            raise BackendUnavailable(
+                f"{name}.{key} must be {kind.__name__}, got {value!r}",
+                details={"backend": name, "param": key, "value": str(value)},
+            ) from exc
+        if kind is float and coerced != coerced:
+            raise BackendUnavailable(
+                f"{name}.{key} must be a finite number",
+                details={"backend": name, "param": key},
+            )
+        if (low is not None and coerced < low) or (high is not None and coerced > high):
+            raise BackendUnavailable(
+                f"{name}.{key} must be between {low} and {high}, got {coerced}",
+                details={"backend": name, "param": key, "value": coerced, "min": low, "max": high},
+            )
+        checked[key] = coerced
+    return cls(**checked)
 
 
 def resolve(

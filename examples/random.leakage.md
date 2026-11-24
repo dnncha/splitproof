@@ -4,7 +4,7 @@
 
 - entities: 240
 - data digest: `sha256:ee6f7f5294593cba55ebed4fcd8a33de0ace7ea96e04d8001628072889fb205b`
-- policy digest: `sha256:8aac50768045d463a6892285f82a76cf561b25079163ea1e638a1c685397e109`
+- policy digest: `sha256:7f1dbae30095eae077973849f0e3f8377034eb4a3214507d68076b4f1cbc8202`
 - assignment digest: `sha256:9ad332034a61e75f7ad36a854b55582776bfacb636db191434dc2d71cc594300`
 - splitproof 0.1.0, seed 7
 

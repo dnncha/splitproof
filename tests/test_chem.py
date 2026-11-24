@@ -87,7 +87,7 @@ def test_a_partly_unparsable_column_surfaces_the_count(tmp_path: Path):
     outcome = api.make_split(Policy.from_dict(_policy(path, "tanimoto", 0.5)))
     measured = outcome.reports[0].measured
     assert measured["values_unparsable"] == 4
-    assert measured["values_absent"] == 4
+    assert measured["values_absent"] == 0
 
 
 def test_scaffold_groups_a_shared_core():
@@ -238,3 +238,89 @@ def test_an_equivalence_metric_refuses_a_threshold_below_one(tmp_path: Path):
     with pytest.raises(PolicyError) as error:
         Policy.from_dict(payload)
     assert "always 1" in error.value.message
+
+
+def test_unconstrained_counts_are_not_double_counted(tmp_path: Path):
+    from splitproof import report as report_module
+
+    path = tmp_path / "mixed.csv"
+    lines = ["id,smiles,series,activity"]
+    for position, smiles in enumerate(BENZODIAZEPINES + PYRIDINES):
+        lines.append(f"g{position},{smiles},s,{position}")
+    for position in range(4):
+        lines.append(f"bad{position},@@@nope@@@,s,{position}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    outcome = api.make_split(Policy.from_dict(_policy(path, "tanimoto", 0.5)))
+    summary = report_module.summary(outcome.certificate)
+    entities = outcome.certificate["dataset"]["entities"]
+    assert entities == 10
+    assert "4 entities had no usable value" in summary
+
+
+EQUIVALENT_PAIRS = [
+    ("indole", "c1ccc2[nH]ccc2c1", "N-methylindole", "Cn1ccc2ccccc21"),
+    ("caffeine", "Cn1cnc2c1c(=O)n(C)c(=O)n2C", "theophylline", "Cn1c(=O)c2[nH]cnc2n(C)c1=O"),
+    ("adenine", "Nc1ncnc2[nH]cnc12", "9-methyladenine", "Cn1cnc2c(N)ncnc21"),
+    ("pyridine", "c1ccncc1", "pyridinium", "c1cc[nH+]cc1"),
+    (
+        "morphine",
+        "CN1CCC23c4c5ccc(O)c4OC2C(O)C=CC3C1C5",
+        "ent-morphine",
+        "CN1CC[C@]23c4c5ccc(O)c4O[C@@H]2[C@H](O)C=C[C@H]3[C@H]1C5",
+    ),
+    (
+        "aspirin",
+        "CC(=O)Oc1ccccc1C(=O)O",
+        "aspirin tosylate",
+        "CC(=O)Oc1ccccc1C(=O)O.Cc1ccc(S(=O)(=O)O)cc1",
+    ),
+]
+
+DISTINCT_PAIRS = [
+    ("benzene", "c1ccccc1", "pyridine", "c1ccncc1"),
+    ("indole", "c1ccc2[nH]ccc2c1", "benzimidazole", "c1ccc2[nH]cnc2c1"),
+    ("naphthalene", "c1ccc2ccccc2c1", "quinoline", "c1ccc2ncccc2c1"),
+]
+
+
+def _key(smiles: str):
+    from rdkit import Chem
+
+    from splitproof.sim.chem import ring_systems
+
+    return ring_systems(Chem, Chem.MolFromSmiles(smiles))
+
+
+@pytest.mark.parametrize("left_name,left,right_name,right", EQUIVALENT_PAIRS)
+def test_near_duplicates_share_a_ring_key(left_name, left, right_name, right):
+    """N-substitution, protonation, stereochemistry and salt form must not separate.
+
+    The first implementation keyed on the parent molecule's own SMILES, so
+    N-methylindole, theophylline, pyridinium, an enantiomer and a tosylate salt all
+    landed in different classes and could cross folds freely.
+    """
+    assert _key(left) == _key(right), (left_name, right_name)
+
+
+@pytest.mark.parametrize("left_name,left,right_name,right", DISTINCT_PAIRS)
+def test_genuinely_different_skeletons_stay_apart(left_name, left, right_name, right):
+    assert _key(left) != _key(right), (left_name, right_name)
+
+
+def test_a_salt_and_its_parent_land_in_the_same_fold(tmp_path: Path):
+    path = tmp_path / "salts.csv"
+    path.write_text(
+        "id,smiles,activity,fold\n"
+        "parent,CC(=O)Oc1ccccc1C(=O)O,1,train\n"
+        "salt,CC(=O)Oc1ccccc1C(=O)O.Cc1ccc(S(=O)(=O)O)cc1,1,test\n"
+        "other,c1ccc2ncccc2c1,2,train\n"
+        "other2,c1ccc2ncccc2c1,2,test\n",
+        encoding="utf-8",
+    )
+    outcome = api.audit(
+        Policy.from_dict(_policy(path, "ring_systems", 1.0)),
+        split_column="fold",
+        skip_neighbours=True,
+    )
+    assert outcome.reports[0].status == VIOLATED
+    assert outcome.reports[0].measured["cross_fold_pairs_at_or_above_threshold"] == 2

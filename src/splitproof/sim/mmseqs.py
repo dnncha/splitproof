@@ -102,6 +102,12 @@ class MMseqs2Identity(SimilarityBackend):
     name = "mmseqs2"
     metric = "identity"
     exactness = HEURISTIC
+    policy_params = {
+        "coverage": (float, 0.0, 1.0),
+        "sensitivity": (float, 1.0, 10.0),
+        "evalue": (float, 0.0, 1e6),
+        "cov_mode": (int, 0, 5),
+    }
 
     def __init__(
         self,

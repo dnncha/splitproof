@@ -66,11 +66,7 @@
       "status": "satisfied"
     }
   ],
-  "created": "2026-11-24T02:57:12+00:00",
-  "cutsite": {
-    "schema": 1,
-    "version": "0.1.0"
-  },
+  "created": "2026-11-24T03:24:02+00:00",
   "dataset": {
     "digest": "sha256:ee6f7f5294593cba55ebed4fcd8a33de0ace7ea96e04d8001628072889fb205b",
     "entities": 240,
@@ -120,7 +116,6 @@
         "kind": "disjoint"
       }
     ],
-    "cutsite": 1,
     "dataset": {
       "dates": {
         "deposited": "deposited"
@@ -146,12 +141,17 @@
       },
       "kind": "holdout"
     },
-    "seed": 7
+    "seed": 7,
+    "splitproof": 1
   },
-  "policy_digest": "sha256:8aac50768045d463a6892285f82a76cf561b25079163ea1e638a1c685397e109",
+  "policy_digest": "sha256:7f1dbae30095eae077973849f0e3f8377034eb4a3214507d68076b4f1cbc8202",
   "seed": 7,
   "source": {
     "path": "proteins.csv"
+  },
+  "splitproof": {
+    "schema": 1,
+    "version": "0.1.0"
   },
   "status": "satisfied",
   "units": {
