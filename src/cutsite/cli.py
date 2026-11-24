@@ -6,7 +6,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import __version__, api, cert as cert_module, dataset as dataset_module, report as report_module
 from .errors import CutsiteError, InfeasibleSplit
@@ -18,7 +18,8 @@ EXIT_VIOLATED = 1
 EXIT_ERROR = 2
 EXIT_INFEASIBLE = 3
 
-PROTEIN_LETTERS = set("ACDEFGHIKLMNPQRSTVWYBXZUO*-")
+PROTEIN_LETTERS = set("ACDEFGHIKLMNPQRSTVWY")
+AMBIGUOUS_LETTERS = set("BXZUO*-")
 NUCLEOTIDE_LETTERS = set("ACGTUN-")
 ID_HINTS = ("id", "accession", "uniprot", "name", "identifier", "key", "entry")
 SEQUENCE_HINTS = ("seq", "sequence", "protein", "aa", "peptide", "dna", "rna")
@@ -162,7 +163,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _pair_budget(args: argparse.Namespace) -> Dict[str, int]:
-    return {"max_pairs": args.max_pairs} if getattr(args, "max_pairs", None) else {}
+    value = getattr(args, "max_pairs", None)
+    return {} if value is None else {"max_pairs": value}
 
 
 def _overrides(values: Sequence[str]) -> Dict[str, str]:
@@ -245,6 +247,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         split_path=args.split,
         split_column=args.split_column,
         exact_max_n=args.exact_max_n,
+        skip_neighbours=args.no_neighbours,
         **_pair_budget(args),
         backend_overrides=_overrides(args.backend),
     )
@@ -256,7 +259,22 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print()
         print("verified" if result.ok else "NOT verified")
     if not result.ok:
-        return EXIT_VIOLATED if result.status == VIOLATED else EXIT_ERROR
+        return EXIT_ERROR
+    if result.status == VIOLATED:
+        if not args.json:
+            print(
+                "the certificate verifies, and it records a violated constraint",
+                file=sys.stderr,
+            )
+        return EXIT_VIOLATED
+    if args.require_exact and result.status == SATISFIED_UNPROVEN:
+        if not args.json:
+            print(
+                "the certificate verifies, but --require-exact was set and it is not proven "
+                "exhaustively",
+                file=sys.stderr,
+            )
+        return EXIT_VIOLATED
     return EXIT_OK
 
 
@@ -266,7 +284,11 @@ def _cmd_units(args: argparse.Namespace) -> int:
     policy = Policy.load(args.policy)
     data = dataset_module.load_for(policy, args.data)
     graph = units_module.build(
-        policy, data, exact_max_n=args.exact_max_n, backend_overrides=_overrides(args.backend)
+        policy,
+        data,
+        exact_max_n=args.exact_max_n,
+        backend_overrides=_overrides(args.backend),
+        **_pair_budget(args),
     )
     payload = graph.to_dict()
     if args.json:
@@ -336,9 +358,25 @@ def _looks_like_sequence(values: Sequence[Optional[str]]) -> Optional[str]:
     letters = set("".join(present[:50]).upper())
     if letters <= NUCLEOTIDE_LETTERS:
         return "dna"
-    if letters <= PROTEIN_LETTERS:
+    if letters <= PROTEIN_LETTERS | AMBIGUOUS_LETTERS and not letters <= AMBIGUOUS_LETTERS:
         return "protein"
     return None
+
+
+def _is_unambiguous_sequence(values: Sequence[Optional[str]]) -> bool:
+    """Whether values look like sequences without the column name saying so.
+
+    English clinical terms are spelled from a subset of the amino-acid letters, so
+    "ADENOCARCINOMA" and "MELANOCYTOMA" used to be classified as proteins. Requiring
+    a long, varied alphabet keeps real words out.
+    """
+    present = [value for value in values if value][:200]
+    if not present:
+        return False
+    if min(len(value) for value in present) < 40:
+        return False
+    alphabet = set("".join(present[:50]).upper())
+    return len(alphabet & PROTEIN_LETTERS) >= 15
 
 
 def _looks_like_molecule(name: str, values: Sequence[Optional[str]]) -> bool:
@@ -363,12 +401,11 @@ def _looks_like_date(values: Sequence[Optional[str]]) -> bool:
     return True
 
 
-def _cmd_init(args: argparse.Namespace) -> int:
-    path = Path(args.data)
-    header_id = args.id
+def guess_policy(path: Path, id_column: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Guess a starter policy from a data file, returning the policy and what it saw."""
+    header_id = id_column
     if header_id is None:
-        probe = _probe_header(path)
-        header_id = _guess_id(probe)
+        header_id = _guess_id(_probe_header(path))
     data = dataset_module.load(path, header_id)
     similarity: Dict[str, Any] = {}
     groups: List[str] = []
@@ -379,13 +416,14 @@ def _cmd_init(args: argparse.Namespace) -> int:
             continue
         lowered = name.lower()
         kind = _looks_like_sequence(values)
-        if kind and (any(hint in lowered for hint in SEQUENCE_HINTS) or kind):
+        named_like_a_sequence = any(hint in lowered for hint in SEQUENCE_HINTS)
+        if kind and (named_like_a_sequence or _is_unambiguous_sequence(values)):
             similarity.setdefault("sequence", {"column": name, "kind": kind})
             continue
         if _looks_like_molecule(name, values):
             similarity.setdefault("molecule", {"column": name, "kind": "molecule"})
             continue
-        if _looks_like_date(values) or any(hint in lowered for hint in DATE_HINTS):
+        if _looks_like_date(values):
             dates.setdefault(lowered.replace(" ", "_"), name)
             continue
         distinct = len({value for value in values if value is not None})
@@ -401,7 +439,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
         )
     if "molecule" in similarity:
         constraints.append(
-            {"kind": "similarity", "key": "molecule", "metric": "scaffold", "threshold": 1.0}
+            {"kind": "similarity", "key": "molecule", "metric": "ring_systems"}
         )
     for group in groups:
         constraints.append({"kind": "disjoint", "key": group})
@@ -431,18 +469,36 @@ def _cmd_init(args: argparse.Namespace) -> int:
     }
     if label:
         policy["dataset"]["label"] = label
+    seen = {
+        "rows": len(data),
+        "id": header_id,
+        "similarity": sorted(similarity),
+        "groups": list(groups),
+        "dates": sorted(dates),
+        "label": label,
+        "needs_mmseqs": any(c.get("metric") == "identity" for c in constraints),
+    }
+    return policy, seen
+
+
+def _cmd_init(args: argparse.Namespace) -> int:
+    policy, seen = guess_policy(Path(args.data), args.id)
     _write_policy(Path(args.out), policy)
-    message = (
-        f"wrote {args.out} for {len(data)} rows: id='{header_id}', "
-        f"similarity={sorted(similarity)}, groups={groups}, dates={sorted(dates)}"
-    )
     if args.json:
-        json.dump({"ok": True, "policy": str(args.out), "guessed": policy}, sys.stdout, indent=2, sort_keys=True)
+        json.dump(
+            {"ok": True, "policy": str(args.out), "guessed": policy, "seen": seen},
+            sys.stdout,
+            indent=2,
+            sort_keys=True,
+        )
         sys.stdout.write("\n")
     else:
-        print(message)
+        print(
+            f"wrote {args.out} for {seen['rows']} rows: id='{seen['id']}', "
+            f"similarity={seen['similarity']}, groups={seen['groups']}, dates={seen['dates']}"
+        )
         print("Review it: cutsite guessed these columns, and a guess is not a policy.")
-        if any(c.get("metric") == "identity" for c in constraints):
+        if seen["needs_mmseqs"]:
             print("The sequence constraint uses metric 'identity', which needs MMseqs2 installed.")
     return EXIT_OK
 

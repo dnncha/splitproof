@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from ..errors import BackendFailed
 from . import (
     DEFAULT_MAX_PAIRS,
     EXACT,
@@ -32,39 +33,36 @@ def _rdkit():
     return Chem, rdFingerprintGenerator
 
 
-def murcko_framework(chemistry, molecule) -> Optional[str]:
-    """The ring systems and the linkers between them, as canonical SMILES.
+def ring_systems(chemistry, molecule) -> Optional[str]:
+    """The molecule's ring systems, canonicalised and sorted, joined by '|'.
 
-    Computed by repeatedly deleting terminal atoms that are not in a ring, which
-    leaves exactly the ring systems plus the paths joining them. Exocyclic
-    substituents go, including exocyclic double-bonded atoms, so a lactam and its
-    parent ring share a framework. That groups more molecules together than
-    RDKit's MurckoScaffoldSmiles does, which is the safe direction for a split.
+    Fused rings are merged into one system, then each system is written as a
+    canonical SMILES fragment of the parent molecule, so nothing is edited and
+    nothing needs re-sanitising. Returns None for a molecule with no rings.
 
-    Returns None for a molecule with no rings, which has no framework. It does
-    not catch toolkit failures: a split must not quietly lose a constraint
-    because a scaffold could not be computed.
+    This is not the Bemis-Murcko scaffold: linkers between ring systems are not
+    kept, so it groups more molecules together than a Murcko scaffold would. That
+    is the safe direction for a split, and it is why the metric is called
+    ring_systems rather than scaffold. RDKit's own MurckoScaffoldSmiles is not
+    used because MurckoDecompose raises on every input in RDKit 2026.09.
     """
-    editable = chemistry.RWMol(molecule)
-    chemistry.FastFindRings(editable)
-    while True:
-        victim = None
-        for atom in editable.GetAtoms():
-            if atom.GetDegree() <= 1 and not atom.IsInRing():
-                victim = atom.GetIdx()
-                break
-        if victim is None:
-            break
-        editable.RemoveAtom(victim)
-        chemistry.FastFindRings(editable)
-    if editable.GetNumAtoms() == 0:
+    info = molecule.GetRingInfo()
+    if info.NumRings() == 0:
         return None
-    for atom in editable.GetAtoms():
-        atom.SetNoImplicit(False)
-        atom.SetNumExplicitHs(0)
-    framework = editable.GetMol()
-    chemistry.SanitizeMol(framework)
-    return chemistry.MolToSmiles(framework)
+    systems: List[set] = []
+    for ring in info.AtomRings():
+        current = set(ring)
+        overlapping = [existing for existing in systems if existing & current]
+        systems = [existing for existing in systems if not (existing & current)]
+        for existing in overlapping:
+            current |= existing
+        systems.append(current)
+    return "|".join(
+        sorted(
+            chemistry.MolFragmentToSmiles(molecule, atomsToUse=sorted(system), canonical=True)
+            for system in systems
+        )
+    )
 
 
 class _ChemBackend(SimilarityBackend):
@@ -156,11 +154,15 @@ class MorganTanimoto(_ChemBackend):
         kind: str,
         queries: Sequence[int],
         targets: Sequence[int],
+        order: Optional[Sequence[str]] = None,
     ) -> Dict[int, Optional[Neighbour]]:
         from rdkit import DataStructs
 
         prints, _missing, _unparsable = self._fingerprints(values)
-        target_list = [i for i in sorted(set(int(t) for t in targets)) if prints[i] is not None]
+        key = (lambda index: str(order[index])) if order is not None else (lambda index: index)
+        target_list = [
+            i for i in sorted(set(int(t) for t in targets), key=key) if prints[i] is not None
+        ]
         out: Dict[int, Optional[Neighbour]] = {}
         for raw in queries:
             query = int(raw)
@@ -171,15 +173,15 @@ class MorganTanimoto(_ChemBackend):
             if not pool:
                 continue
             sims = DataStructs.BulkTanimotoSimilarity(prints[query], [prints[i] for i in pool])
-            best = max(range(len(pool)), key=lambda position: sims[position])
+            best = min(range(len(pool)), key=lambda position: (-sims[position], key(pool[position])))
             out[query] = Neighbour(index=pool[best], similarity=float(sims[best]))
         return out
 
 
-@register("scaffold")
-class MurckoScaffold(_ChemBackend):
-    name = "scaffold"
-    metric = "scaffold"
+@register("ring_systems")
+class RingSystems(_ChemBackend):
+    name = "ring_systems"
+    metric = "ring_systems"
     exactness = EXACT
     emits = "classes"
 
@@ -198,7 +200,17 @@ class MurckoScaffold(_ChemBackend):
                 if value:
                     unparsable.append(i)
                 continue
-            framework = murcko_framework(Chem, molecule)
+            try:
+                framework = ring_systems(Chem, molecule)
+            except Exception as exc:
+                raise BackendFailed(
+                    f"could not extract ring systems from {value!r}",
+                    remedy=(
+                        "This is a bug in cutsite's framework reduction, not in your data. "
+                        "Please report the SMILES."
+                    ),
+                    details={"backend": self.name, "smiles": value, "reason": str(exc)},
+                ) from exc
             out.append(framework)
             if framework is None:
                 missing.append(i)
@@ -222,9 +234,9 @@ class MurckoScaffold(_ChemBackend):
             for member in members:
                 groups[member] = label
         notes = [
-            "molecules sharing a Murcko framework (ring systems plus their linkers, with all "
-            "exocyclic substituents removed) form an equivalence class, so no pairwise edge "
-            "list is ever built"
+            "molecules sharing the same set of ring systems form an equivalence class, so no "
+            "pairwise edge list is ever built; linkers between ring systems are not part of the "
+            "key, so this groups more widely than a Bemis-Murcko scaffold"
         ]
         if unparsable:
             notes.append(f"{len(unparsable)} entities hold SMILES that RDKit could not parse")
@@ -244,7 +256,7 @@ class MurckoScaffold(_ChemBackend):
             missing=missing,
             unparsable=unparsable,
             notes=notes,
-            params={"distinct_scaffolds": len(buckets)},
+            params={"distinct_ring_system_sets": len(buckets)},
         )
 
     def nearest(
@@ -253,10 +265,12 @@ class MurckoScaffold(_ChemBackend):
         kind: str,
         queries: Sequence[int],
         targets: Sequence[int],
+        order: Optional[Sequence[str]] = None,
     ) -> Dict[int, Optional[Neighbour]]:
         scaffolds, _missing, _unparsable = self._scaffolds(values)
+        key = (lambda index: str(order[index])) if order is not None else (lambda index: index)
         lookup: Dict[str, int] = {}
-        for i in sorted(set(int(t) for t in targets)):
+        for i in sorted(set(int(t) for t in targets), key=key):
             scaffold = scaffolds[i]
             if scaffold:
                 lookup.setdefault(scaffold, i)

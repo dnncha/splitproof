@@ -141,7 +141,16 @@ class MMseqs2Identity(SimilarityBackend):
             return "unknown"
         return (result.stdout or result.stderr).strip().splitlines()[0] if (result.stdout or result.stderr) else "unknown"
 
-    def command(self, query: Path, target: Path, out: Path, tmp: Path, threshold: float) -> List[str]:
+    def command(
+        self,
+        query: Path,
+        target: Path,
+        out: Path,
+        tmp: Path,
+        threshold: float,
+        kind: str = "protein",
+    ) -> List[str]:
+        nucleotide = kind in {"dna", "rna"}
         return [
             self.executable() or self.binary,
             "easy-search",
@@ -167,12 +176,13 @@ class MMseqs2Identity(SimilarityBackend):
             "query,target,fident",
             "-v",
             "1",
-        ]
+        ] + (["--search-type", "3"] if nucleotide else [])
 
     def _write_fasta(self, path: Path, values: Sequence[Optional[str]], indices: Sequence[int]) -> None:
         with path.open("w", encoding="utf-8") as handle:
             for i in indices:
-                handle.write(f">s{i}\n{values[i]}\n")
+                sequence = "".join(str(values[i]).split())
+                handle.write(f">s{i}\n{sequence}\n")
 
     def pairs_above(
         self,
@@ -197,7 +207,7 @@ class MMseqs2Identity(SimilarityBackend):
                 fasta = root / "seqs.fasta"
                 out = root / "hits.tsv"
                 self._write_fasta(fasta, values, present)
-                _run(self.command(fasta, fasta, out, root / "tmp", threshold), self.name)
+                _run(self.command(fasta, fasta, out, root / "tmp", threshold, kind), self.name)
                 id_to_index = {f"s{i}": i for i in present}
                 triples = parse_search_tsv(
                     out.read_text(encoding="utf-8"),
@@ -229,6 +239,7 @@ class MMseqs2Identity(SimilarityBackend):
         kind: str,
         queries: Sequence[int],
         targets: Sequence[int],
+        order: Optional[Sequence[str]] = None,
     ) -> Dict[int, Optional[Neighbour]]:
         out: Dict[int, Optional[Neighbour]] = {int(q): None for q in queries}
         query_list = [i for i in sorted(set(int(q) for q in queries)) if values[i]]
@@ -240,7 +251,7 @@ class MMseqs2Identity(SimilarityBackend):
             query_fasta, target_fasta, hits = root / "q.fasta", root / "t.fasta", root / "hits.tsv"
             self._write_fasta(query_fasta, values, query_list)
             self._write_fasta(target_fasta, values, target_list)
-            _run(self.command(query_fasta, target_fasta, hits, root / "tmp", 0.0), self.name)
+            _run(self.command(query_fasta, target_fasta, hits, root / "tmp", 0.0, kind), self.name)
             id_to_index = {f"s{i}": i for i in set(query_list) | set(target_list)}
             target_set = set(target_list)
             for line in hits.read_text(encoding="utf-8").splitlines():
@@ -257,6 +268,9 @@ class MMseqs2Identity(SimilarityBackend):
                 if identity > 1.0:
                     identity /= 100.0
                 current = out.get(left)
-                if current is None or identity > current.similarity:
+                better = current is None or identity > current.similarity
+                if not better and current is not None and identity == current.similarity:
+                    better = str(order[right]) < str(order[current.index]) if order else right < current.index
+                if better:
                     out[left] = Neighbour(index=right, similarity=identity)
         return out

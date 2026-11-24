@@ -15,6 +15,7 @@ from . import (
     SimilarityResult,
     PairCollector,
     guard_candidate_budget,
+    tie_ranks,
     register,
 )
 
@@ -90,6 +91,12 @@ class ExactJaccard(SimilarityBackend):
     metric = "kmer_jaccard"
     exactness = EXACT
 
+    def __init__(self, k: Optional[int] = None):
+        self.k = k
+
+    def size_for(self, kind: str) -> int:
+        return self.k if self.k else kmer_size(kind)
+
     def version(self) -> str:
         import scipy
 
@@ -106,8 +113,9 @@ class ExactJaccard(SimilarityBackend):
         *,
         max_pairs: int = DEFAULT_MAX_PAIRS,
     ) -> SimilarityResult:
-        k = kmer_size(kind)
+        k = self.size_for(kind)
         matrix, sizes, missing, vocab_size = _matrix(values, k)
+        sizes = sizes.astype(np.float64)
         collector = PairCollector(self.name, threshold, max_pairs)
         n = matrix.shape[0]
         transposed = matrix.T.tocsr()
@@ -124,6 +132,7 @@ class ExactJaccard(SimilarityBackend):
             if not keep.any():
                 continue
             rows, cols, inter = rows[keep], cols[keep], inter[keep]
+            inter = inter.astype(np.float64)
             union = sizes[rows] + sizes[cols] - inter
             with np.errstate(divide="ignore", invalid="ignore"):
                 sim = np.where(union > 0, inter / union, 0.0)
@@ -153,15 +162,18 @@ class ExactJaccard(SimilarityBackend):
         kind: str,
         queries: Sequence[int],
         targets: Sequence[int],
+        order: Optional[Sequence[str]] = None,
     ) -> Dict[int, Optional[Neighbour]]:
-        k = kmer_size(kind)
+        k = self.size_for(kind)
+        ranks = tie_ranks(order, len(values))
         matrix, sizes, _missing, _vocab = _matrix(values, k)
+        sizes = sizes.astype(np.float64)
         target_index = np.asarray(sorted(set(targets)), dtype=np.int64)
         out: Dict[int, Optional[Neighbour]] = {int(q): None for q in queries}
         if target_index.size == 0:
             return out
         target_matrix = matrix[target_index].T.tocsr()
-        target_sizes = sizes[target_index]
+        target_sizes = sizes[target_index].astype(np.float64)
         query_index = np.asarray(sorted(set(int(q) for q in queries)), dtype=np.int64)
         step = _chunk_rows(np.diff(matrix.indptr))
         for start in range(0, query_index.size, step):
@@ -173,7 +185,7 @@ class ExactJaccard(SimilarityBackend):
             local_cols = block.col.astype(np.int64)
             global_rows = rows[local_rows]
             global_cols = target_index[local_cols]
-            inter = block.data
+            inter = block.data.astype(np.float64)
             union = sizes[global_rows] + target_sizes[local_cols] - inter
             with np.errstate(divide="ignore", invalid="ignore"):
                 sim = np.where(union > 0, inter / union, 0.0)
@@ -181,8 +193,12 @@ class ExactJaccard(SimilarityBackend):
             if not keep.any():
                 continue
             global_rows, global_cols, sim = global_rows[keep], global_cols[keep], sim[keep]
-            order = np.lexsort((-sim, global_rows))
-            global_rows, global_cols, sim = global_rows[order], global_cols[order], sim[order]
+            ordering = np.lexsort((ranks[global_cols], -sim, global_rows))
+            global_rows, global_cols, sim = (
+                global_rows[ordering],
+                global_cols[ordering],
+                sim[ordering],
+            )
             _unique, first = np.unique(global_rows, return_index=True)
             for position in first:
                 out[int(global_rows[position])] = Neighbour(
@@ -197,9 +213,13 @@ class MinHashJaccard(SimilarityBackend):
     metric = "kmer_jaccard"
     exactness = LOWER_BOUND
 
-    def __init__(self, num_perm: int = 128, seed: int = 7):
+    def __init__(self, num_perm: int = 128, seed: int = 7, k: Optional[int] = None):
         self.num_perm = num_perm
         self.seed = seed
+        self.k = k
+
+    def size_for(self, kind: str) -> int:
+        return self.k if self.k else kmer_size(kind)
 
     def version(self) -> str:
         return f"builtin-minhash-{self.num_perm}"
@@ -267,7 +287,7 @@ class MinHashJaccard(SimilarityBackend):
         *,
         max_pairs: int = DEFAULT_MAX_PAIRS,
     ) -> SimilarityResult:
-        k = kmer_size(kind)
+        k = self.size_for(kind)
         bands, rows = self._bands(threshold)
         signatures, token_sets, missing = self._signatures(values, k)
         candidates: set = set()
@@ -323,5 +343,6 @@ class MinHashJaccard(SimilarityBackend):
         kind: str,
         queries: Sequence[int],
         targets: Sequence[int],
+        order: Optional[Sequence[str]] = None,
     ) -> Dict[int, Optional[Neighbour]]:
-        return ExactJaccard().nearest(values, kind, queries, targets)
+        return ExactJaccard(k=self.k).nearest(values, kind, queries, targets, order)

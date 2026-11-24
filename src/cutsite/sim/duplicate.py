@@ -74,9 +74,11 @@ class ExactDuplicate(SimilarityBackend):
         kind: str,
         queries: Sequence[int],
         targets: Sequence[int],
+        order: Optional[Sequence[str]] = None,
     ) -> Dict[int, Optional[Neighbour]]:
+        key = (lambda index: str(order[index])) if order is not None else (lambda index: index)
         lookup: Dict[str, int] = {}
-        for i in sorted(set(int(t) for t in targets)):
+        for i in sorted(set(int(t) for t in targets), key=key):
             value = values[i]
             if value is not None:
                 lookup.setdefault(_normalise(value), i)

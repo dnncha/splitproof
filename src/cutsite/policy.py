@@ -13,13 +13,15 @@ SIMILARITY_METRICS = {
     "identity": {"sequence"},
     "kmer_jaccard": {"sequence"},
     "tanimoto": {"molecule"},
-    "scaffold": {"molecule"},
+    "ring_systems": {"molecule"},
     "exact_duplicate": {"sequence", "molecule", "text"},
 }
 
 KEY_KINDS = {"protein", "dna", "rna", "molecule", "text"}
 
-SPAN_ACTIONS = {"test", "train", "drop", "error"}
+EQUIVALENCE_METRICS = {"exact_duplicate", "ring_systems"}
+
+SPAN_ACTIONS = {"test", "drop", "error"}
 
 
 def _require(mapping: Dict[str, Any], key: str, where: str) -> Any:
@@ -36,6 +38,11 @@ def _as_int(value: Any, where: str) -> int:
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
         raise PolicyError(
             f"{where} must be a whole number, got {type(value).__name__}",
+            details={"where": where, "value": str(value)},
+        )
+    if isinstance(value, float) and value != int(value):
+        raise PolicyError(
+            f"{where} must be a whole number, got {value!r}",
             details={"where": where, "value": str(value)},
         )
     try:
@@ -108,8 +115,15 @@ def _as_date(value: Any, where: str) -> _dt.date:
         return value.date()
     if isinstance(value, _dt.date):
         return value
+    text = str(value)
+    if len(text) > 10 and text[10] not in {"T", " "}:
+        raise PolicyError(
+            f"{where} has trailing characters after the date: {value!r}",
+            remedy="Use YYYY-MM-DD, optionally followed by T or a space and a time.",
+            details={"where": where, "value": text},
+        )
     try:
-        return _dt.date.fromisoformat(str(value)[:10])
+        return _dt.date.fromisoformat(text[:10])
     except ValueError as exc:
         raise PolicyError(
             f"{where} is not an ISO date: {value!r}",
@@ -496,12 +510,22 @@ def _parse_similarity(item: Dict[str, Any], where: str, dataset: DatasetSpec) ->
             remedy=f"Metric '{metric}' applies to {sorted(SIMILARITY_METRICS[metric])} keys.",
             details={"where": where, "metric": metric, "key_kind": kind},
         )
-    threshold = _as_float(_require(item, "threshold", where), f"{where}.threshold")
-    if not 0.0 < threshold <= 1.0:
-        raise PolicyError(
-            f"{where}.threshold must be in (0, 1], got {threshold}",
-            details={"where": where, "value": threshold},
-        )
+    if metric in EQUIVALENCE_METRICS:
+        threshold = _as_float(item.get("threshold", 1.0), f"{where}.threshold")
+        if threshold != 1.0:
+            raise PolicyError(
+                f"{where}.metric '{metric}' compares values for equality, so its threshold is "
+                f"always 1, not {threshold:g}",
+                remedy="Drop the threshold, or set it to 1.",
+                details={"where": where, "metric": metric, "value": threshold},
+            )
+    else:
+        threshold = _as_float(_require(item, "threshold", where), f"{where}.threshold")
+        if not 0.0 < threshold <= 1.0:
+            raise PolicyError(
+                f"{where}.threshold must be in (0, 1], got {threshold}",
+                details={"where": where, "value": threshold},
+            )
     backend = _as_text(item["backend"], f"{where}.backend") if item.get("backend") else None
     params_raw = _as_mapping(item.get("params") or {}, f"{where}.params")
     params: Dict[str, Any] = {}
@@ -540,8 +564,14 @@ def _parse_temporal(item: Dict[str, Any], where: str, dataset: DatasetSpec) -> T
         )
     on_span = _as_text(item.get("on_span", "test"), f"{where}.on_span")
     if on_span not in SPAN_ACTIONS:
+        extra = (
+            " Pinning a spanning unit to the 'before' fold would put post-cutoff items there, "
+            "which is the very thing the constraint forbids."
+            if on_span == "train"
+            else ""
+        )
         raise PolicyError(
-            f"{where}.on_span must be one of {sorted(SPAN_ACTIONS)}, got {on_span!r}",
+            f"{where}.on_span must be one of {sorted(SPAN_ACTIONS)}, got {on_span!r}.{extra}",
             details={"where": where, "value": on_span},
         )
     return TemporalConstraint(key=key, cutoff=cutoff, before=before, after=after, on_span=on_span)

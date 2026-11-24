@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .assign import DROPPED, Assignment
 from .dataset import Dataset
+from .errors import VacuousConstraint
 from .policy import DisjointConstraint, Policy, SimilarityConstraint, TemporalConstraint
 from .sim import EXACT, resolve
 from .units import UnitGraph, _constraint_id
@@ -243,6 +244,20 @@ def _check_temporal(
     assignment: Assignment,
 ) -> ConstraintReport:
     column = policy.dataset.dates[constraint.key]
+    if constraint.before not in assignment.folds:
+        raise VacuousConstraint(
+            f"the temporal constraint guards fold '{constraint.before}', which this split does "
+            f"not contain, so it could never bind",
+            remedy=(
+                f"The split's folds are {sorted(assignment.folds)}. Set the constraint's "
+                "'before' to the fold that must stay clean of post-cutoff data."
+            ),
+            details={
+                "constraint": f"temporal:{constraint.key}",
+                "guards": constraint.before,
+                "folds": sorted(assignment.folds),
+            },
+        )
     dates = data.dates(column)
     wrong_side: List[Dict[str, Any]] = []
     missing = 0
@@ -303,15 +318,28 @@ def diagnostics(
     skip_neighbours: bool = False,
     backend_overrides: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
-    out: Dict[str, Any] = {"reference_fold": reference_fold(assignment), "keys": {}}
-    anchor = out["reference_fold"]
-    if anchor is None or skip_neighbours or not policy.similarity_constraints:
-        return out
     members = assignment.fold_members()
-    targets = members.get(anchor, [])
-    queries = [index for fold, group in members.items() if fold != anchor for index in group]
-    if not targets or not queries:
+    anchor = reference_fold(assignment)
+    held_out_against_rest = anchor not in members
+    out: Dict[str, Any] = {
+        "reference_fold": "each fold against the rest" if held_out_against_rest else anchor,
+        "keys": {},
+    }
+    if skip_neighbours or not policy.similarity_constraints or not members:
         return out
+    if held_out_against_rest:
+        probes = [
+            (group, [i for name, other in members.items() if name != fold for i in other])
+            for fold, group in sorted(members.items())
+        ]
+    else:
+        targets = members.get(anchor, [])
+        queries = [index for fold, group in members.items() if fold != anchor for index in group]
+        probes = [(queries, targets)]
+    probes = [(q, t) for q, t in probes if q and t]
+    if not probes:
+        return out
+    queries = [index for group, _ in probes for index in group]
     label_values = data.column(policy.dataset.label_column) if policy.dataset.label_column else None
     kind = units_label_kind(policy, label_values) if label_values is not None else None
     for constraint in policy.similarity_constraints:
@@ -324,7 +352,12 @@ def diagnostics(
             exact_max_n=exact_max_n,
             settings=constraint.settings,
         )
-        neighbours = backend.nearest(data.column(key.column), key.kind, queries, targets)
+        neighbours: Dict[int, Any] = {}
+        column = data.column(key.column)
+        for probe_queries, probe_targets in probes:
+            neighbours.update(
+                backend.nearest(column, key.kind, probe_queries, probe_targets, data.ids)
+            )
         sims = [n.similarity for n in neighbours.values() if n is not None]
         entry: Dict[str, Any] = {
             "metric": constraint.metric,

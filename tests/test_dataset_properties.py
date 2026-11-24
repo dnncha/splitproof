@@ -113,10 +113,47 @@ def test_ragged_rows_do_not_crash(tmp_path):
     assert len(data.column("a")) == 3
 
 
-def test_na_spellings_become_missing(tmp_path):
-    path = _write(tmp_path, "n.csv", "id,v\n1,NA\n2,nan\n3,NULL\n4,\n5,real\n")
+def test_only_an_empty_cell_is_missing(tmp_path):
+    """The guard for an escape: 'NA', 'None' and 'Null' are real biological values.
+
+    'NA' is North America, neuraminidase, sodium or the Asn-Ala dipeptide; 'None' is
+    the unperturbed arm of a screen; 'Null' is a knockout genotype. Treating them as
+    missing silently unconstrained whole groups and still certified the split clean.
+    """
+    path = _write(tmp_path, "n.csv", "id,v\n1,NA\n2,None\n3,NULL\n4,\n5,   \n6,real\n")
     data = dataset_module.load(path, "id")
-    assert data.column("v") == [None, None, None, None, "real"]
+    assert data.column("v") == ["NA", "None", "NULL", None, None, "real"]
+
+
+def test_a_group_named_na_is_still_a_group(tmp_path):
+    from cutsite import api
+    from cutsite.policy import Policy
+
+    path = _write(
+        tmp_path,
+        "sites.csv",
+        "id,seq,site,fold\n"
+        "a,ACDEFGHIKLMNPQRST,NA,train\n"
+        "b,ACDEFGHIKLMNPQRST,NA,test\n"
+        "c,WWWWWWWWWWWWWWWWW,None,train\n"
+        "d,WWWWWWWWWWWWWWWWW,None,test\n",
+    )
+    payload = {
+        "cutsite": 1,
+        "dataset": {
+            "path": str(path),
+            "id": "id",
+            "similarity": {"sequence": {"column": "seq", "kind": "protein"}},
+            "groups": ["site"],
+            "dates": {},
+        },
+        "scheme": {"kind": "holdout", "fractions": {"train": 0.5, "test": 0.5}},
+        "constraints": [{"kind": "disjoint", "key": "site"}],
+        "seed": 7,
+    }
+    outcome = api.audit(Policy.from_dict(payload), split_column="fold", skip_neighbours=True)
+    assert outcome.reports[0].status == "violated"
+    assert outcome.reports[0].measured["values_in_more_than_one_fold"] == 2
 
 
 def test_a_utf8_bom_does_not_corrupt_the_first_column_name(tmp_path):

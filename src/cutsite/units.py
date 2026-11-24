@@ -240,6 +240,13 @@ def build(
 
     for constraint in policy.disjoint_constraints:
         values = data.column(constraint.key)
+        if size and all(value is None for value in values):
+            raise VacuousConstraint(
+                f"every entity lacks a value for group '{constraint.key}', so the disjoint "
+                "constraint could never bind and a clean result would prove nothing",
+                remedy="Check the column name and that it actually holds group labels.",
+                details={"constraint": f"disjoint:{constraint.key}", "key": constraint.key, "entities": size},
+            )
         buckets: Dict[str, int] = {}
         merged = 0
         for i, value in enumerate(values):
@@ -299,6 +306,13 @@ def _temporal_pins(
     for constraint in policy.temporal_constraints:
         column = policy.dataset.dates[constraint.key]
         dates = data.dates(column)
+        if dates and all(when is None for when in dates):
+            raise VacuousConstraint(
+                f"every entity lacks a date for '{constraint.key}', so the temporal constraint "
+                "could never bind and a clean result would prove nothing",
+                remedy="Check the column name and that it holds ISO dates.",
+                details={"constraint": f"temporal:{constraint.key}", "column": column},
+            )
         for root, members in groups.items():
             before = [m for m in members if dates[m] is not None and dates[m] < constraint.cutoff]
             after = [m for m in members if dates[m] is not None and dates[m] >= constraint.cutoff]
@@ -321,8 +335,7 @@ def _temporal_pins(
                 if constraint.on_span == "drop":
                     dropped.update(members)
                     continue
-                target = constraint.after if constraint.on_span == "test" else constraint.before
-                pins[root] = target
+                pins[root] = constraint.after
             elif after:
                 pins[root] = constraint.after
             elif before:

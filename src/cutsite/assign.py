@@ -117,19 +117,33 @@ def assign(policy: Policy, graph: UnitGraph, *, tolerance: float = 0.1) -> Assig
             )
 
     shares = _label_shares(graph.units)
-    for unit in sorted(floating, key=lambda u: (-u.size, _tiebreak(policy.seed, u))):
+    placement: Dict[int, str] = {}
+    ordered = sorted(floating, key=lambda u: (-u.size, _tiebreak(policy.seed, u)))
+    for position, unit in enumerate(ordered):
         choice = _best_fold(unit, fold_names, targets, counts, label_counts, shares)
+        placement[position] = choice
         _place(unit, choice, fold_of, counts, unit_counts, label_counts)
+
+    _fill_empty_folds(
+        fold_names, ordered, placement, fold_of, counts, unit_counts, label_counts
+    )
 
     empty = [name for name in fold_names if counts[name] == 0]
     if empty:
         raise InfeasibleSplit(
-            f"fold(s) {empty} came out empty",
+            f"fold(s) {empty} came out empty, and no unit could be moved to fill them",
             remedy=(
-                "There are fewer independent units than folds. Lower the similarity threshold, "
-                "reduce the number of folds, or use scheme.kind: leave-unit-out."
+                f"There are {len(graph.units)} independent units for {len(fold_names)} folds, and "
+                "the units that could move are pinned by a temporal constraint. Lower the "
+                "similarity threshold, reduce the number of folds, or use "
+                "scheme.kind: leave-unit-out."
             ),
-            details={"empty_folds": empty, "units": len(graph.units), "folds": list(fold_names)},
+            details={
+                "empty_folds": empty,
+                "units": len(graph.units),
+                "movable_units": len(ordered),
+                "folds": list(fold_names),
+            },
         )
 
     stats = [
@@ -143,6 +157,49 @@ def assign(policy: Policy, graph: UnitGraph, *, tolerance: float = 0.1) -> Assig
         for name in fold_names
     ]
     return Assignment(fold_of=fold_of, folds=list(fold_names), stats=stats, dropped=list(graph.dropped))
+
+
+def _fill_empty_folds(
+    fold_names: Sequence[str],
+    ordered: Sequence[Unit],
+    placement: Dict[int, str],
+    fold_of: Dict[int, str],
+    counts: Dict[str, int],
+    unit_counts: Dict[str, int],
+    label_counts: Dict[str, Dict[str, int]],
+) -> None:
+    """Move units into folds the greedy pass left empty.
+
+    Minimising total squared deviation can still put every unit in one fold when a
+    fold's target is small and the units are large: an 80/20 split of two equal
+    units scores better with both in train than with one in each. An empty fold is
+    not a split, so the smallest movable unit is moved into it.
+    """
+    for name in fold_names:
+        if counts[name] > 0:
+            continue
+        donors = [
+            position
+            for position, unit in enumerate(ordered)
+            if unit_counts[placement[position]] > 1
+        ]
+        if not donors:
+            return
+        choice = min(donors, key=lambda position: (ordered[position].size, placement[position]))
+        unit = ordered[choice]
+        source = placement[choice]
+        for member in unit.members:
+            fold_of[member] = name
+        counts[source] -= unit.size
+        unit_counts[source] -= 1
+        counts[name] += unit.size
+        unit_counts[name] += 1
+        for label, amount in unit.label_counts.items():
+            label_counts[source][label] = label_counts[source].get(label, 0) - amount
+            if label_counts[source][label] == 0:
+                del label_counts[source][label]
+            label_counts[name][label] = label_counts[name].get(label, 0) + amount
+        placement[choice] = name
 
 
 def _place(
@@ -210,7 +267,7 @@ def _leave_unit_out(graph: UnitGraph) -> Assignment:
     fold_of: Dict[int, str] = {}
     stats: List[FoldStat] = []
     names: List[str] = []
-    for position, unit in enumerate(sorted(graph.units, key=lambda u: (-u.size, u.key))):
+    for position, unit in enumerate(sorted(graph.units, key=lambda u: (-u.size, u.signature))):
         name = f"unit{position}"
         names.append(name)
         for member in unit.members:

@@ -1,6 +1,7 @@
 __version__ = "0.1.0"
 
 from .errors import (  # noqa: E402
+    BackendFailed,
     BackendUnavailable,
     CertificateMismatch,
     ConstraintViolated,
@@ -9,7 +10,9 @@ from .errors import (  # noqa: E402
     GiantUnit,
     InfeasibleSplit,
     PolicyError,
+    VacuousConstraint,
 )
+from .sim import TooManyPairs  # noqa: E402
 from .policy import Policy  # noqa: E402
 
 __all__ = [
@@ -23,6 +26,9 @@ __all__ = [
     "GiantUnit",
     "CertificateMismatch",
     "ConstraintViolated",
+    "VacuousConstraint",
+    "BackendFailed",
+    "TooManyPairs",
     "audit",
     "make_split",
     "verify",

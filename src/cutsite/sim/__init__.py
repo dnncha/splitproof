@@ -255,8 +255,22 @@ class SimilarityBackend:
         kind: str,
         queries: Sequence[int],
         targets: Sequence[int],
+        order: Optional[Sequence[str]] = None,
     ) -> Dict[int, Optional[Neighbour]]:
         raise NotImplementedError
+
+
+def tie_ranks(order: Optional[Sequence[str]], size: int) -> "np.ndarray":
+    """Stable ranks used only to break equal-similarity ties.
+
+    Without them the nearest neighbour of a query with two equally similar targets
+    depends on row order, which changed the 1-NN baseline and broke verification on
+    permuted data.
+    """
+    if order is None:
+        return np.arange(size, dtype=np.int64)
+    keys = [str(order[index]) for index in range(size)]
+    return np.argsort(np.argsort(np.asarray(keys))).astype(np.int64)
 
 
 BACKENDS: Dict[str, type] = {}
@@ -286,8 +300,10 @@ def construct(cls, settings: Dict[str, Any]):
 
         accepted = sorted(
             name
-            for name in inspect.signature(cls.__init__).parameters
-            if name not in {"self"}
+            for name, parameter in inspect.signature(cls.__init__).parameters.items()
+            if name != "self"
+            and parameter.kind
+            not in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
         )
         raise BackendUnavailable(
             f"backend {getattr(cls, 'name', cls.__name__)!r} does not accept those params",
@@ -325,8 +341,8 @@ def resolve(
         backend = construct(table["exact_duplicate"], settings)
     elif metric == "tanimoto":
         backend = construct(table["tanimoto"], settings)
-    elif metric == "scaffold":
-        backend = construct(table["scaffold"], settings)
+    elif metric == "ring_systems":
+        backend = construct(table["ring_systems"], settings)
     else:
         raise BackendUnavailable(
             f"no backend implements metric {metric!r}",

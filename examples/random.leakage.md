@@ -78,7 +78,7 @@ Reference fold: `train`
 - held-out items compared: 74
 - nearest reference similarity: {'min': 0.325153, 'p50': 0.630189, 'p90': 0.721116, 'p99': 0.792531, 'max': 0.87013, 'mean': 0.620862}
 - at or above the declared threshold: 73
-- nearest-neighbour baseline: spearman=0.881424 over 74 items
+- nearest-neighbour baseline: spearman=0.881475 over 74 items
 - what a nearest-neighbour copy of the reference fold scores. Similarity reasoning is a legitimate model, so this is neither a floor nor a ceiling: a model that does not clearly beat it has not shown it learned anything beyond similarity, and beating it is not on its own evidence that the split is sound
 
 ## What this does and does not prove

@@ -52,9 +52,9 @@ def build(
         "dataset": {
             "digest": data.digest_for(policy),
             "entities": len(data),
-            "path": str(data.path) if data.path else None,
             "id_column": policy.dataset.id_column,
         },
+        "source": {"path": str(data.path) if data.path else None},
         "assignment": {
             "digest": assignment_digest(data, assignment),
             **assignment.to_dict(),
@@ -88,7 +88,14 @@ def read(path: Path) -> Dict[str, Any]:
             f"{path} is not a cutsite certificate",
             details={"path": str(path)},
         )
-    schema = int(loaded.get("cutsite", {}).get("schema", 0))
+    header = loaded.get("cutsite")
+    if not isinstance(header, dict) or not isinstance(header.get("schema"), int):
+        raise CertificateMismatch(
+            f"{path} has no readable cutsite schema header",
+            remedy="Pass the cutsite.cert.json produced by 'cutsite split'.",
+            details={"path": str(path), "header": str(header)},
+        )
+    schema = header["schema"]
     if schema != SCHEMA:
         raise CertificateMismatch(
             f"certificate schema {schema} is not supported by cutsite {__version__}",
@@ -118,13 +125,13 @@ def policy_from(certificate: Dict[str, Any]) -> Policy:
     return Policy.from_dict(certificate["policy"])
 
 
-VOLATILE = ("created", "environment", "audited")
+VOLATILE = ("created", "environment", "audited", "source")
 
 SECTIONS = (
     ("cutsite", "the certificate was produced by this build of cutsite"),
     ("policy", "the embedded policy is the one being verified against"),
     ("policy_digest", "the policy still hashes to the recorded digest"),
-    ("dataset", "the data file is byte-for-byte the one the split was built from"),
+    ("dataset", "the data holds the same ids and values the split was built from"),
     ("assignment", "the split assignment is the one the certificate describes"),
     ("units", "the independent units, backends and their parameters are unchanged"),
     ("constraints", "every constraint re-measures to exactly the recorded values"),

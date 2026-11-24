@@ -125,13 +125,14 @@ def verify(
     split_column: Optional[str] = None,
     exact_max_n: int = DEFAULT_EXACT_MAX_N,
     max_pairs: int = DEFAULT_MAX_PAIRS,
+    skip_neighbours: bool = False,
     backend_overrides: Optional[Dict[str, str]] = None,
 ) -> cert_module.VerifyResult:
     certificate = cert_module.read(Path(certificate_path))
     policy = cert_module.policy_from(certificate)
     target = data_path
-    if target is None and certificate.get("dataset", {}).get("path"):
-        target = Path(certificate["dataset"]["path"])
+    if target is None and certificate.get("source", {}).get("path"):
+        target = Path(certificate["source"]["path"])
     data = dataset_module.load_for(policy, target)
     assignment = load_assignment(data, split_column=split_column, split_path=split_path)
     graph = units_module.build(
@@ -144,7 +145,12 @@ def verify(
     assignment.stats = assign_module.describe(policy, data, assignment, graph)
     reports = evaluate_module.check(policy, data, assignment, graph)
     diagnostics = evaluate_module.diagnostics(
-        policy, data, assignment, exact_max_n=exact_max_n, backend_overrides=backend_overrides
+        policy,
+        data,
+        assignment,
+        exact_max_n=exact_max_n,
+        skip_neighbours=skip_neighbours,
+        backend_overrides=backend_overrides,
     )
     recomputed = cert_module.build(policy, data, graph, assignment, reports, diagnostics)
     return cert_module.verify(certificate, recomputed)
@@ -191,6 +197,17 @@ def _from_split_file(data: Dataset, path: Path) -> Assignment:
             f"the split file names {len(unknown)} ids that are not in the data",
             remedy="Check that the split file's first column holds the same ids as the data file.",
             details={"examples": unknown[:10]},
+        )
+    uncovered = sorted(known - set(mapping))
+    if uncovered:
+        raise DataError(
+            f"the split file covers {len(mapping)} of {len(known)} entities, leaving "
+            f"{len(uncovered)} unassigned",
+            remedy=(
+                "Every entity must be in a fold, or the audit would silently grade only the part "
+                "the file mentions. Add the missing ids, or drop them from the data file."
+            ),
+            details={"covered": len(mapping), "entities": len(known), "examples": uncovered[:10]},
         )
     fold_of: Dict[int, str] = {}
     counts: Dict[str, int] = {}

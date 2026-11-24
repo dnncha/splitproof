@@ -41,6 +41,10 @@ class GiantUnit(InfeasibleSplit):
     code = "GIANT_UNIT"
 
 
+class BackendFailed(CutsiteError):
+    code = "BACKEND_FAILED"
+
+
 class VacuousConstraint(CutsiteError):
     code = "CONSTRAINT_VACUOUS"
 

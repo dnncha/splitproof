@@ -66,7 +66,7 @@
       "status": "satisfied"
     }
   ],
-  "created": "2026-11-24T02:24:26+00:00",
+  "created": "2026-11-24T02:57:12+00:00",
   "cutsite": {
     "schema": 1,
     "version": "0.1.0"
@@ -74,8 +74,7 @@
   "dataset": {
     "digest": "sha256:ee6f7f5294593cba55ebed4fcd8a33de0ace7ea96e04d8001628072889fb205b",
     "entities": 240,
-    "id_column": "accession",
-    "path": "proteins.csv"
+    "id_column": "accession"
   },
   "diagnostics": {
     "keys": {
@@ -87,7 +86,7 @@
           "compared": 31,
           "metric": "spearman",
           "note": "what a nearest-neighbour copy of the reference fold scores. Similarity reasoning is a legitimate model, so this is neither a floor nor a ceiling: a model that does not clearly beat it has not shown it learned anything beyond similarity, and beating it is not on its own evidence that the split is sound",
-          "value": -0.00264
+          "value": 0.117907
         },
         "nearest_reference_similarity": {
           "max": 0.00232,
@@ -151,6 +150,9 @@
   },
   "policy_digest": "sha256:8aac50768045d463a6892285f82a76cf561b25079163ea1e638a1c685397e109",
   "seed": 7,
+  "source": {
+    "path": "proteins.csv"
+  },
   "status": "satisfied",
   "units": {
     "dropped_entities": 0,
@@ -168,6 +170,7 @@
         "backend": "exact_jaccard",
         "backend_version": "scipy-1.18.1",
         "edges": 500,
+        "equivalence_classes": null,
         "exactness": "exact",
         "metric": "kmer_jaccard",
         "missing_values": 0,

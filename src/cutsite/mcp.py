@@ -119,14 +119,22 @@ def _summarise(certificate: Dict[str, Any], extra: Optional[Dict[str, Any]] = No
 
 
 def _do_init(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    from .cli import main as cli_main
+    from .cli import guess_policy, _write_policy
 
-    out = arguments.get("out") or "cutsite.yaml"
-    argv = ["init", str(arguments["data"]), "--out", str(out)]
-    if arguments.get("id_column"):
-        argv += ["--id", str(arguments["id_column"])]
-    code = cli_main(argv)
-    return {"ok": code == 0, "policy": out, "exit_code": code}
+    out = Path(arguments.get("out") or "cutsite.yaml")
+    policy, seen = guess_policy(Path(arguments["data"]), arguments.get("id_column"))
+    _write_policy(out, policy)
+    return {
+        "ok": True,
+        "policy": str(out),
+        "guessed": policy,
+        "seen": seen,
+        "summary": (
+            f"Guessed a policy for {seen['rows']} rows: id '{seen['id']}', similarity keys "
+            f"{seen['similarity']}, groups {seen['groups']}, dates {seen['dates']}. A guess is "
+            "not a policy: read it and correct it before trusting a split built from it."
+        ),
+    }
 
 
 def _do_split(arguments: Dict[str, Any]) -> Dict[str, Any]:

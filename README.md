@@ -111,8 +111,10 @@ FAIL constraints: every constraint re-measures to exactly the recorded values
        constraints[0].measured.max_cross_fold_similarity: certificate says 0.0, recomputed None
 ```
 
-Exit codes: `0` verified, `1` a declared constraint is genuinely violated, `2`
-verification itself failed. Put it in CI and your split stops being a claim in a methods
+Exit codes: `0` verified, `1` the certificate verifies and records a violated constraint
+(or `--require-exact` was set and it is not proven exhaustively), `2` verification itself
+failed. The certificate records the data's content digest, not its path, so it verifies on
+another machine. Put it in CI and your split stops being a claim in a methods
 section.
 
 The certificate is a reproducibility anchor, not a cryptographic signature. It detects
@@ -218,7 +220,7 @@ Constraint status: VIOLATED.
 - no value of 'donor_id' may appear in more than one fold: VIOLATED.
 Worst held-out similarity to the reference fold: 0.87013 (74 of 74 held-out items have
   any neighbour).
-Similarity baseline on sequence:kmer_jaccard@0.4: spearman=0.881424 over 74 held-out
+Similarity baseline on sequence:kmer_jaccard@0.4: spearman=0.881475 over 74 held-out
   items. Report any model score next to this one.
 Held-out items' nearest reference similarity: median 0.630189, p99 0.792531, max 0.87013.
 ```
@@ -236,10 +238,10 @@ $ cutsite split proteins.yaml
 Constraint status: proven.
 Worst held-out similarity to the reference fold: 0.00232 (31 of 42 held-out items have
   any neighbour).
-Similarity baseline: spearman=-0.00264 over 31 held-out items.
+Similarity baseline: spearman=0.117907 over 31 held-out items.
 ```
 
-The baseline collapses from 0.88 to −0.003, and the worst held-out similarity falls from
+The baseline collapses from 0.88 to 0.12, and the worst held-out similarity falls from
 0.87 to 0.002. That gap is how much of the original score was leakage.
 
 Note the baseline's denominator: 31 of the 42 held-out items, because only those share
@@ -251,7 +253,7 @@ The example data is synthetic and built to make the point: 40 homologous familie
 near-constant labels, and six donor groups that collapse them into six units. It
 demonstrates the mechanism; it is not evidence about any real dataset.
 
-Note the fold sizes: 36/204, not the requested 48/192. Six donor groups across 240 rows
+Note the fold sizes: 42/198, not the requested 48/192. Six donor groups across 240 rows
 means only six independent units exist, so the achievable fractions are coarse.
 `cutsite` reports the drift rather than hiding it.
 
@@ -323,16 +325,18 @@ file telling an agent when to reach for it and how to read the result honestly.
 | `kmer_jaccard` | exact sparse Jaccard | core install | exact |
 | `kmer_jaccard` | MinHash LSH (large n) | core install | lower bound |
 | `tanimoto` | RDKit Morgan fingerprints | `cutsite[chem]` | exact |
-| `scaffold` | Murcko framework over RDKit | `cutsite[chem]` | exact |
+| `ring_systems` | canonical ring-system set over RDKit | `cutsite[chem]` | exact |
 | `exact_duplicate` | normalised equality | core install | exact |
 
 Reads CSV, TSV, FASTA, and Parquet with `cutsite[parquet]`.
 
-The `scaffold` backend computes the Murcko framework itself — ring systems plus their
-linkers, with every exocyclic substituent removed — rather than calling RDKit's
-`MurckoScaffoldSmiles`, which is broken in RDKit 2026.09. It therefore groups slightly
-more molecules together than RDKit's variant does (a lactam shares a framework with its
-parent ring), which is the safe direction for a split.
+The `ring_systems` backend groups molecules by their canonical set of ring systems,
+computed as SMILES fragments of the parent molecule so nothing is edited and nothing
+needs re-sanitising. It is deliberately not called `scaffold`: linkers between ring
+systems are not part of the key, so it groups more widely than a Bemis-Murcko scaffold,
+which is the safe direction for a split. RDKit's own `MurckoScaffoldSmiles` is unusable
+because `MurckoDecompose` raises on every input in RDKit 2026.09, and a hand-rolled
+Murcko reduction crashed on indole, caffeine, tryptophan and every nucleobase.
 
 Numeric labels are stratified by quantile bucket rather than by raw value, and a label
 with more distinct values than a sensible class count is reported as not stratified

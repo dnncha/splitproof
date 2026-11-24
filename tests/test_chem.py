@@ -8,7 +8,7 @@ from cutsite import api
 from cutsite.evaluate import SATISFIED, VIOLATED
 from cutsite.policy import Policy
 from cutsite.sim import EXACT, TooManyPairs
-from cutsite.sim.chem import MorganTanimoto, MurckoScaffold
+from cutsite.sim.chem import MorganTanimoto, RingSystems
 
 rdkit = pytest.importorskip("rdkit", reason="RDKit is not installed on this machine")
 
@@ -91,14 +91,14 @@ def test_a_partly_unparsable_column_surfaces_the_count(tmp_path: Path):
 
 
 def test_scaffold_groups_a_shared_core():
-    result = MurckoScaffold().pairs_above(BENZODIAZEPINES, "molecule", 1.0)
+    result = RingSystems().pairs_above(BENZODIAZEPINES, "molecule", 1.0)
     assert result.groups is not None
     assert len(set(result.groups)) == 1
     assert len(result.pairs) == 0
 
 
 def test_scaffold_keeps_different_cores_apart():
-    result = MurckoScaffold().pairs_above(BENZODIAZEPINES + PYRIDINES, "molecule", 1.0)
+    result = RingSystems().pairs_above(BENZODIAZEPINES + PYRIDINES, "molecule", 1.0)
     assert result.groups[:3] == [result.groups[0]] * 3
     assert result.groups[3:] == [result.groups[3]] * 3
     assert result.groups[0] != result.groups[3]
@@ -115,7 +115,7 @@ def test_tanimoto_nearest_finds_the_closest_analogue():
 
 def test_scaffold_split_keeps_a_series_together(tmp_path: Path):
     path = _write(tmp_path / "mols.csv", [("bzd", BENZODIAZEPINES), ("pyr", PYRIDINES)])
-    outcome = api.make_split(Policy.from_dict(_policy(path, "scaffold", 1.0)))
+    outcome = api.make_split(Policy.from_dict(_policy(path, "ring_systems", 1.0)))
     series = outcome.data.column("series")
     seen = {}
     for index, fold in outcome.assignment.fold_of.items():
@@ -130,7 +130,7 @@ def test_a_scaffold_leak_is_caught(tmp_path: Path):
     for position, smiles in enumerate(BENZODIAZEPINES):
         lines.append(f"b{position},{smiles},bzd,{position},{'train' if position % 2 == 0 else 'test'}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    outcome = api.audit(Policy.from_dict(_policy(path, "scaffold", 1.0)), split_column="fold")
+    outcome = api.audit(Policy.from_dict(_policy(path, "ring_systems", 1.0)), split_column="fold")
     assert outcome.reports[0].status == VIOLATED
 
 
@@ -138,7 +138,7 @@ def test_tanimoto_charges_the_pair_budget_but_scaffold_needs_no_pairs():
     values = BENZODIAZEPINES * 8
     with pytest.raises(TooManyPairs):
         MorganTanimoto().pairs_above(values, "molecule", 0.1, max_pairs=5)
-    classes = MurckoScaffold().pairs_above(values, "molecule", 1.0, max_pairs=5)
+    classes = RingSystems().pairs_above(values, "molecule", 1.0, max_pairs=5)
     assert len(classes.pairs) == 0
     assert classes.groups is not None
 
@@ -148,26 +148,26 @@ def test_an_acyclic_only_dataset_refuses_rather_than_passing_vacuously(tmp_path:
 
     path = _write(tmp_path / "alkanes.csv", [("alk", ALKANES)])
     with pytest.raises(VacuousConstraint) as error:
-        api.make_split(Policy.from_dict(_policy(path, "scaffold", 1.0)))
+        api.make_split(Policy.from_dict(_policy(path, "ring_systems", 1.0)))
     assert error.value.code == "CONSTRAINT_VACUOUS"
-    assert error.value.details["backend"] == "scaffold"
+    assert error.value.details["backend"] == "ring_systems"
 
 
-def test_framework_ignores_halogen_and_smiles_ordering():
+def test_ring_systems_ignore_halogen_and_smiles_ordering():
     from rdkit import Chem
 
-    from cutsite.sim.chem import murcko_framework
+    from cutsite.sim.chem import ring_systems
 
-    frameworks = {murcko_framework(Chem, Chem.MolFromSmiles(s)) for s in BENZODIAZEPINES}
-    assert len(frameworks) == 1
+    keys = {ring_systems(Chem, Chem.MolFromSmiles(s)) for s in BENZODIAZEPINES}
+    assert len(keys) == 1
 
 
-def test_framework_is_none_for_a_molecule_with_no_rings():
+def test_ring_systems_are_none_for_a_molecule_with_no_rings():
     from rdkit import Chem
 
-    from cutsite.sim.chem import murcko_framework
+    from cutsite.sim.chem import ring_systems
 
-    assert murcko_framework(Chem, Chem.MolFromSmiles("CCCC")) is None
+    assert ring_systems(Chem, Chem.MolFromSmiles("CCCC")) is None
 
 
 def test_unparsable_input_downgrades_proven_to_unproven(tmp_path: Path):
@@ -186,3 +186,55 @@ def test_unparsable_input_downgrades_proven_to_unproven(tmp_path: Path):
     assert report.status == "satisfied_unproven"
     assert any("compared to nothing" in note for note in report.notes)
     assert outcome.certificate["status"] == "satisfied_unproven"
+
+
+REAL_DRUGS = {
+    "indole": "c1ccc2[nH]ccc2c1",
+    "caffeine": "Cn1cnc2c1c(=O)n(C)c(=O)n2C",
+    "tryptophan": "NC(Cc1c[nH]c2ccccc12)C(=O)O",
+    "adenine": "Nc1ncnc2[nH]cnc12",
+    "guanine": "Nc1nc2[nH]cnc2c(=O)[nH]1",
+    "thymine": "Cc1c[nH]c(=O)[nH]c1=O",
+    "sildenafil": "CCCc1nn(C)c2c(=O)[nH]c(-c3cc(S(=O)(=O)N4CCN(C)CC4)ccc3OCC)nc12",
+    "omeprazole": "CC1=CN=C(C(=C1OC)C)CS(=O)C2=NC3=C(N2)C=C(C=C3)OC",
+    "atorvastatin": "CC(C)c1c(C(=O)Nc2ccccc2)c(-c2ccccc2)c(-c2ccc(F)cc2)n1CCC(O)CC(O)CC(=O)O",
+    "morphine": "CN1CCC23c4c5ccc(O)c4OC2C(O)C=CC3C1C5",
+    "aspirin": "CC(=O)Oc1ccccc1C(=O)O",
+    "metformin": "CN(C)C(=N)NC(N)=N",
+}
+
+
+@pytest.mark.parametrize("name,smiles", sorted(REAL_DRUGS.items()))
+def test_ring_systems_survives_real_drugs(name, smiles):
+    """The guard for an escape: the previous hand-rolled Murcko reduction crashed.
+
+    Stripping explicit hydrogens from pyrrole-type aromatic nitrogen broke
+    kekulisation, so indole, caffeine, tryptophan and every nucleobase raised
+    KekulizeException. Seven of nine common compounds failed.
+    """
+    from rdkit import Chem
+
+    from cutsite.sim.chem import ring_systems
+
+    molecule = Chem.MolFromSmiles(smiles)
+    assert molecule is not None, name
+    key = ring_systems(Chem, molecule)
+    assert key is None or isinstance(key, str)
+
+
+def test_every_real_drug_goes_through_the_backend_without_failing():
+    values = list(REAL_DRUGS.values())
+    result = RingSystems().pairs_above(values, "molecule", 1.0)
+    assert result.groups is not None
+    assert len(result.missing) == 1
+
+
+def test_an_equivalence_metric_refuses_a_threshold_below_one(tmp_path: Path):
+    from cutsite.errors import PolicyError
+
+    path = _write(tmp_path / "m.csv", [("bzd", BENZODIAZEPINES)])
+    payload = _policy(path, "ring_systems", 1.0)
+    payload["constraints"][0]["threshold"] = 0.1
+    with pytest.raises(PolicyError) as error:
+        Policy.from_dict(payload)
+    assert "always 1" in error.value.message

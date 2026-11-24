@@ -79,14 +79,71 @@ def test_a_late_item_in_train_is_the_only_temporal_violation(tmp_path: Path):
 
 def test_an_early_item_in_test_is_not_a_temporal_violation(tmp_path: Path):
     rows = make_rows(families=8, members=2, seed=23)
-    for row in rows:
+    for position, row in enumerate(rows):
         row["deposited"] = "2024-06-15"
-        row["fold"] = "test"
-    path = write_csv(tmp_path / "all-early-test.csv", rows)
+        row["fold"] = "train" if position % 2 else "test"
+    path = write_csv(tmp_path / "all-early.csv", rows)
     payload = _policy(path)
     payload["constraints"] = [{"kind": "temporal", "key": "deposited", "cutoff": "2025-01-01"}]
     outcome = api.audit(Policy.from_dict(payload), split_column="fold", skip_neighbours=True)
     assert outcome.reports[0].status == SATISFIED
+    assert outcome.reports[0].measured["items_after_the_cutoff_in_train"] == 0
+
+
+def test_a_temporal_audit_refuses_a_split_without_the_guarded_fold(tmp_path: Path):
+    from cutsite.errors import VacuousConstraint
+
+    rows = make_rows(families=6, members=2, seed=24)
+    for row in rows:
+        row["deposited"] = "2025-06-15"
+        row["fold"] = "Train"
+    path = write_csv(tmp_path / "capitalised.csv", rows)
+    payload = _policy(path)
+    payload["constraints"] = [{"kind": "temporal", "key": "deposited", "cutoff": "2025-01-01"}]
+    with pytest.raises(VacuousConstraint) as error:
+        api.audit(Policy.from_dict(payload), split_column="fold", skip_neighbours=True)
+    assert error.value.details["guards"] == "train"
+    assert error.value.details["folds"] == ["Train"]
+
+
+def test_on_span_train_is_refused_as_self_contradictory(tmp_path: Path):
+    payload = _policy(_straddling(tmp_path))
+    payload["constraints"].append(
+        {"kind": "temporal", "key": "deposited", "cutoff": "2025-01-01", "on_span": "train"}
+    )
+    with pytest.raises(PolicyError) as error:
+        Policy.from_dict(payload)
+    assert "the very thing the constraint forbids" in error.value.message
+
+
+def test_an_all_blank_group_column_is_refused(tmp_path: Path):
+    from cutsite.errors import VacuousConstraint
+
+    rows = make_rows(families=6, members=3, seed=25)
+    for row in rows:
+        row["donor_id"] = ""
+    path = write_csv(tmp_path / "blank-group.csv", rows)
+    payload = _policy(path)
+    payload["dataset"]["groups"] = ["donor_id"]
+    payload["constraints"] = [{"kind": "disjoint", "key": "donor_id"}]
+    with pytest.raises(VacuousConstraint) as error:
+        api.make_split(Policy.from_dict(payload))
+    assert error.value.details["key"] == "donor_id"
+
+
+def test_an_all_blank_date_column_is_refused(tmp_path: Path):
+    from cutsite.errors import VacuousConstraint
+
+    rows = make_rows(families=6, members=3, seed=26)
+    for row in rows:
+        row["deposited"] = ""
+    path = write_csv(tmp_path / "blank-date.csv", rows)
+    payload = _policy(path)
+    payload["constraints"].append(
+        {"kind": "temporal", "key": "deposited", "cutoff": "2025-01-01"}
+    )
+    with pytest.raises(VacuousConstraint):
+        api.make_split(Policy.from_dict(payload))
 
 
 @pytest.mark.parametrize(

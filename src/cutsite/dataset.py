@@ -43,8 +43,15 @@ class Dataset:
             if raw is None or raw == "":
                 out.append(None)
                 continue
+            text = str(raw)
+            if len(text) > 10 and text[10] not in {"T", " "}:
+                raise DataError(
+                    f"column '{name}' holds {raw!r}, which has trailing characters after the date",
+                    remedy="Use YYYY-MM-DD, optionally followed by T or a space and a time.",
+                    details={"column": name, "value": text},
+                )
             try:
-                out.append(_dt.date.fromisoformat(str(raw)[:10]))
+                out.append(_dt.date.fromisoformat(text[:10]))
             except ValueError as exc:
                 raise DataError(
                     f"column '{name}' holds {raw!r}, which is not an ISO date",
@@ -69,12 +76,18 @@ class Dataset:
 
 
 def _normalise(value: Any) -> Optional[str]:
+    """Only an empty cell is missing.
+
+    'NA' is North America, neuraminidase, sodium and the Asn-Ala dipeptide. 'None'
+    is the unperturbed arm of a Perturb-seq screen. 'Null' is a knockout genotype.
+    Treating those as missing silently unconstrains real groups, so cutsite does not.
+    """
     if value is None:
         return None
-    text = str(value).strip()
-    if text == "" or text.upper() in {"NA", "NAN", "NONE", "NULL"}:
+    if isinstance(value, float) and value != value:
         return None
-    return text
+    text = str(value).strip()
+    return text or None
 
 
 def _from_records(records: Sequence[Dict[str, Any]], fieldnames: Sequence[str], id_column: str, path: Optional[Path]) -> Dataset:
