@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import numpy as np
 
 from dataclasses import dataclass, field
@@ -495,6 +497,8 @@ def _nn_baseline(
             try:
                 guess_value, actual_value = float(guess), float(actual)
             except ValueError:
+                continue
+            if not (math.isfinite(guess_value) and math.isfinite(actual_value)):
                 continue
             predicted.append(guess_value)
             truth.append(actual_value)

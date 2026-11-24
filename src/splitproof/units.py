@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import datetime as _dt
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -128,7 +130,7 @@ def label_kind(policy: Policy, values: Sequence[Optional[str]]) -> str:
         numbers = [float(value) for value in present]
     except ValueError:
         return "categorical"
-    numbers = [number for number in numbers if number == number and abs(number) != float("inf")]
+    numbers = [number for number in numbers if math.isfinite(number)]
     if not numbers:
         return "categorical"
     return "numeric" if len(set(numbers)) > NUMERIC_BUCKETS * 2 else "categorical"
@@ -157,9 +159,7 @@ def label_classes(policy: Policy, data: Dataset) -> Tuple[Optional[List[str]], s
                 remedy="Set dataset.label_kind to categorical, or clean the column.",
                 details={"column": policy.dataset.label_column, "reason": str(exc)},
             ) from exc
-        numeric = [
-            number for number in parsed if number == number and abs(number) != float("inf")
-        ]
+        numeric = [number for number in parsed if math.isfinite(number)]
         if not numeric:
             return None, "none"
         import numpy as np
@@ -172,7 +172,7 @@ def label_classes(policy: Policy, data: Dataset) -> Tuple[Optional[List[str]], s
                 out.append(MISSING_CLASS)
                 continue
             number = float(value)
-            if number != number or abs(number) == float("inf"):
+            if not math.isfinite(number):
                 out.append(MISSING_CLASS)
                 continue
             out.append(f"q{int(np.searchsorted(edges, number, side='right'))}")
