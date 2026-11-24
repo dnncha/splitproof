@@ -108,7 +108,19 @@ TOOLS: List[Dict[str, Any]] = [
 ]
 
 
-def _path(value: Optional[str]) -> Optional[Path]:
+def _optional_text(arguments: Dict[str, Any], name: str) -> Optional[str]:
+    value = arguments.get(name)
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ArgumentsInvalid(
+            f"argument '{name}' must be a string, got {type(value).__name__}", details={"argument": name}
+        )
+    return value
+
+
+def _optional_path(arguments: Dict[str, Any], name: str) -> Optional[Path]:
+    value = _optional_text(arguments, name)
     return Path(value) if value else None
 
 
@@ -176,8 +188,8 @@ def _flag(arguments: Dict[str, Any], name: str) -> bool:
 def _do_init(arguments: Dict[str, Any]) -> Dict[str, Any]:
     from .cli import guess_policy, _write_policy
 
-    out = _writable(arguments.get("out"), "policy.yaml")
-    policy, seen = guess_policy(Path(_required(arguments, "data")), arguments.get("id_column"))
+    out = _writable(_optional_text(arguments, "out"), "policy.yaml")
+    policy, seen = guess_policy(Path(_required(arguments, "data")), _optional_text(arguments, "id_column"))
     _write_policy(out, policy)
     return {
         "ok": True,
@@ -196,16 +208,16 @@ def _do_split(arguments: Dict[str, Any]) -> Dict[str, Any]:
     policy = Policy.load(Path(_required(arguments, "policy")))
     outcome = api.make_split(
         policy,
-        data_path=_path(arguments.get("data")),
+        data_path=_optional_path(arguments, "data"),
         tolerance=_number(arguments, "tolerance", api.DEFAULT_TOLERANCE),
         skip_neighbours=_flag(arguments, "skip_neighbours"),
     )
-    out = _writable(arguments.get("out"), "split.csv")
-    certificate_path = _writable(arguments.get("cert"), "splitproof.cert.json")
+    out = _writable(_optional_text(arguments, "out"), "split.csv")
+    certificate_path = _writable(_optional_text(arguments, "cert"), "splitproof.cert.json")
     api.write_split(out, outcome.data, outcome.assignment, policy.dataset.id_column)
     cert_module.write(certificate_path, outcome.certificate)
-    if arguments.get("report"):
-        _writable(arguments.get("report"), "report.md").write_text(
+    if _optional_text(arguments, "report"):
+        _writable(_optional_text(arguments, "report"), "report.md").write_text(
             report_module.markdown(outcome.certificate), encoding="utf-8"
         )
     ok = outcome.ok
@@ -221,15 +233,15 @@ def _do_audit(arguments: Dict[str, Any]) -> Dict[str, Any]:
     policy = Policy.load(Path(_required(arguments, "policy")))
     outcome = api.audit(
         policy,
-        data_path=_path(arguments.get("data")),
-        split_column=arguments.get("split_column"),
-        split_path=_path(arguments.get("split")),
+        data_path=_optional_path(arguments, "data"),
+        split_column=_optional_text(arguments, "split_column"),
+        split_path=_optional_path(arguments, "split"),
         skip_neighbours=_flag(arguments, "skip_neighbours"),
     )
-    if arguments.get("cert"):
+    if _optional_text(arguments, "cert"):
         cert_module.write(_writable(_required(arguments, "cert"), "audit.cert.json"), outcome.certificate)
-    if arguments.get("report"):
-        _writable(arguments.get("report"), "leakage.md").write_text(
+    if _optional_text(arguments, "report"):
+        _writable(_optional_text(arguments, "report"), "leakage.md").write_text(
             report_module.markdown(outcome.certificate), encoding="utf-8"
         )
     return _summarise(outcome.certificate, {"ok": outcome.ok})
@@ -238,9 +250,9 @@ def _do_audit(arguments: Dict[str, Any]) -> Dict[str, Any]:
 def _do_verify(arguments: Dict[str, Any]) -> Dict[str, Any]:
     result = api.verify(
         Path(_required(arguments, "cert")),
-        data_path=_path(arguments.get("data")),
-        split_path=_path(arguments.get("split")),
-        split_column=arguments.get("split_column"),
+        data_path=_optional_path(arguments, "data"),
+        split_path=_optional_path(arguments, "split"),
+        split_column=_optional_text(arguments, "split_column"),
         skip_neighbours=_flag(arguments, "skip_neighbours"),
     )
     payload = result.to_dict()
@@ -259,7 +271,7 @@ def _do_verify(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 def _do_units(arguments: Dict[str, Any]) -> Dict[str, Any]:
     policy = Policy.load(Path(_required(arguments, "policy")))
-    data = dataset_module.load_for(policy, _path(arguments.get("data")))
+    data = dataset_module.load_for(policy, _optional_path(arguments, "data"))
     return units_module.build(policy, data).to_dict()
 
 

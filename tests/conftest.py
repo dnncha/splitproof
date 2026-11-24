@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import csv
+import os
 import random
 from pathlib import Path
 from typing import Dict, List
 
 import pytest
+from hypothesis import settings
+
+settings.register_profile("gate", derandomize=True, print_blob=True)
+settings.register_profile("explore", derandomize=False, print_blob=True)
+settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "gate"))
 
 ALPHABET = "ACDEFGHIKLMNPQRSTVWY"
 

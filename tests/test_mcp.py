@@ -217,3 +217,35 @@ def test_no_message_kills_the_server_and_only_requests_are_answered(tmp_path, mo
         if "result" in response and "structuredContent" in response["result"]:
             error = response["result"]["structuredContent"].get("error") or {}
             assert error.get("code") != "UNEXPECTED", error
+
+
+ACCESSORS = {"_required", "_number", "_flag", "_optional_text"}
+
+
+def _raw_argument_reads(source: str):
+    import ast
+
+    tree = ast.parse(source)
+    hits = []
+    for function in ast.walk(tree):
+        if not isinstance(function, ast.FunctionDef) or function.name in ACCESSORS:
+            continue
+        for node in ast.walk(function):
+            target = None
+            if isinstance(node, ast.Subscript):
+                target = node.value
+            elif isinstance(node, ast.Attribute) and node.attr == "get":
+                target = node.value
+            if isinstance(target, ast.Name) and target.id == "arguments":
+                hits.append(f"{function.name}:{node.lineno}")
+    return hits
+
+
+def test_tool_arguments_are_read_only_through_typed_accessors():
+    source = (Path(mcp.__file__)).read_text(encoding="utf-8")
+    assert _raw_argument_reads(source) == []
+
+
+def test_the_accessor_rule_catches_a_planted_raw_read():
+    planted = "def _do_x(arguments):\n    return Path(arguments.get('data'))\n"
+    assert _raw_argument_reads(planted) == ["_do_x:2"]
