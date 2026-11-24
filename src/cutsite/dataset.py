@@ -112,11 +112,27 @@ def _from_records(records: Sequence[Dict[str, Any]], fieldnames: Sequence[str], 
 
 def load_delimited(path: Path, id_column: str, delimiter: str) -> Dataset:
     text = Path(path).read_text(encoding="utf-8-sig")
-    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
-    if reader.fieldnames is None:
-        raise DataError(f"{path} has no header row")
-    fieldnames = [name.strip() for name in reader.fieldnames]
-    records = [dict(zip(fieldnames, row.values())) for row in reader]
+    if "\x00" in text:
+        raise DataError(
+            f"{path} contains NUL bytes, so it is not valid text data",
+            remedy=(
+                "The file is probably binary, or truncated mid-write. Check it is the delimited "
+                "text file you meant to pass."
+            ),
+            details={"path": str(path)},
+        )
+    try:
+        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+        if reader.fieldnames is None:
+            raise DataError(f"{path} has no header row")
+        fieldnames = [name.strip() for name in reader.fieldnames]
+        records = [dict(zip(fieldnames, row.values())) for row in reader]
+    except csv.Error as exc:
+        raise DataError(
+            f"{path} is not readable as delimited text: {exc}",
+            remedy="Check the delimiter and that the file is not binary.",
+            details={"path": str(path), "reason": str(exc)},
+        ) from exc
     return _from_records(records, fieldnames, id_column, Path(path))
 
 

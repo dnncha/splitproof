@@ -139,10 +139,16 @@ def test_fasta_wraps_are_joined(tmp_path):
     assert data.column("sequence") == ["ACDEFGHIKLMNPQR"]
 
 
-def test_nul_bytes_and_binary_input_do_not_crash_the_loader(tmp_path):
+def test_nul_bytes_are_refused_the_same_way_on_every_python(tmp_path):
+    """Python 3.10's csv module raises on NUL and 3.13's does not.
+
+    cutsite refuses NUL itself so the behaviour does not depend on the interpreter.
+    """
     with_nul = tmp_path / "nul.csv"
     with_nul.write_bytes("id,seq\na\x00b,ACDEF\n".encode("utf-8"))
-    assert dataset_module.load(with_nul, "id").ids == ["a\x00b"]
+    with pytest.raises(DataError) as error:
+        dataset_module.load(with_nul, "id")
+    assert "NUL" in error.value.message
 
     binary = tmp_path / "binary.csv"
     binary.write_bytes(b"\x00\x01\x02\x03")
