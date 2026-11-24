@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from . import EXACT, Neighbour, SimilarityBackend, SimilarityResult
+from . import (
+    DEFAULT_MAX_PAIRS,
+    EXACT,
+    Neighbour,
+    PairSet,
+    SimilarityBackend,
+    SimilarityResult,
+    guard_pair_budget,
+)
 
 RADIUS_DEFAULT = 2
 BITS_DEFAULT = 2048
@@ -63,11 +71,18 @@ class MorganTanimoto(_ChemBackend):
             prints.append(generator.GetFingerprint(molecule))
         return prints, missing
 
-    def pairs_above(self, values: Sequence[Optional[str]], kind: str, threshold: float) -> SimilarityResult:
+    def pairs_above(
+        self,
+        values: Sequence[Optional[str]],
+        kind: str,
+        threshold: float,
+        *,
+        max_pairs: int = DEFAULT_MAX_PAIRS,
+    ) -> SimilarityResult:
         from rdkit import DataStructs
 
         prints, missing = self._fingerprints(values)
-        pairs: List[Tuple[int, int, float]] = []
+        triples: List[Tuple[int, int, float]] = []
         for i in range(len(prints)):
             if prints[i] is None:
                 continue
@@ -80,7 +95,8 @@ class MorganTanimoto(_ChemBackend):
             sims = DataStructs.BulkTanimotoSimilarity(prints[i], [p for _, p in valid])
             for (j, _), sim in zip(valid, sims):
                 if sim >= threshold:
-                    pairs.append((i, j, float(sim)))
+                    triples.append((i, j, float(sim)))
+            guard_pair_budget(len(triples), max_pairs, self.name, threshold)
         notes = ["Morgan/ECFP fingerprints compared by Tanimoto; computed over all pairs, so exact"]
         if missing:
             notes.append(f"{len(missing)} entities have no parsable SMILES and are treated as unrelated")
@@ -90,7 +106,7 @@ class MorganTanimoto(_ChemBackend):
             metric=self.metric,
             exactness=EXACT,
             threshold=threshold,
-            pairs=pairs,
+            pairs=PairSet.from_triples(triples),
             missing=missing,
             notes=notes,
             params={"radius": self.radius, "bits": self.bits},
@@ -148,18 +164,26 @@ class MurckoScaffold(_ChemBackend):
                 missing.append(i)
         return out, missing
 
-    def pairs_above(self, values: Sequence[Optional[str]], kind: str, threshold: float) -> SimilarityResult:
+    def pairs_above(
+        self,
+        values: Sequence[Optional[str]],
+        kind: str,
+        threshold: float,
+        *,
+        max_pairs: int = DEFAULT_MAX_PAIRS,
+    ) -> SimilarityResult:
         scaffolds, missing = self._scaffolds(values)
         buckets: Dict[str, List[int]] = {}
         for i, scaffold in enumerate(scaffolds):
             if scaffold:
                 buckets.setdefault(scaffold, []).append(i)
-        pairs: List[Tuple[int, int, float]] = []
+        triples: List[Tuple[int, int, float]] = []
         for members in buckets.values():
             for a_pos in range(len(members)):
                 for b_pos in range(a_pos + 1, len(members)):
-                    pairs.append((members[a_pos], members[b_pos], 1.0))
-        pairs.sort()
+                    triples.append((members[a_pos], members[b_pos], 1.0))
+            guard_pair_budget(len(triples), max_pairs, self.name, threshold)
+        pairs = PairSet.from_triples(triples)
         notes = ["molecules sharing a Bemis-Murcko scaffold are treated as one unit"]
         if missing:
             notes.append(f"{len(missing)} entities have no scaffold and are treated as unrelated")

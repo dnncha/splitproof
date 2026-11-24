@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from .dataset import Dataset
 from .errors import PolicyError
 from .policy import Policy, SimilarityConstraint
-from .sim import EXACTNESS_RANK, SimilarityResult, resolve
+from .sim import DEFAULT_MAX_PAIRS, EXACTNESS_RANK, SimilarityResult, resolve
 
 
 class UnionFind:
@@ -113,6 +113,7 @@ def build(
     data: Dataset,
     *,
     exact_max_n: int = 20000,
+    max_pairs: int = DEFAULT_MAX_PAIRS,
     backend_overrides: Optional[Dict[str, str]] = None,
 ) -> UnitGraph:
     size = len(data)
@@ -131,7 +132,9 @@ def build(
             requested=requested,
             exact_max_n=exact_max_n,
         )
-        result = backend.pairs_above(values, key.kind, constraint.threshold)
+        result = backend.pairs_above(
+            values, key.kind, constraint.threshold, max_pairs=max_pairs
+        )
         identifier = _constraint_id(constraint)
         similarity[identifier] = result
         merged = 0

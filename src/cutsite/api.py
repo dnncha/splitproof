@@ -14,6 +14,7 @@ from .assign import Assignment, DROPPED, FoldStat
 from .dataset import Dataset
 from .errors import DataError
 from .policy import Policy
+from .sim import DEFAULT_MAX_PAIRS
 from .units import UnitGraph
 
 DEFAULT_TOLERANCE = 0.1
@@ -40,12 +41,17 @@ def make_split(
     data_path: Optional[Path] = None,
     tolerance: float = DEFAULT_TOLERANCE,
     exact_max_n: int = DEFAULT_EXACT_MAX_N,
+    max_pairs: int = DEFAULT_MAX_PAIRS,
     skip_neighbours: bool = False,
     backend_overrides: Optional[Dict[str, str]] = None,
 ) -> Outcome:
     data = dataset_module.load_for(policy, data_path)
     graph = units_module.build(
-        policy, data, exact_max_n=exact_max_n, backend_overrides=backend_overrides
+        policy,
+        data,
+        exact_max_n=exact_max_n,
+        max_pairs=max_pairs,
+        backend_overrides=backend_overrides,
     )
     assignment = assign_module.assign(policy, graph, tolerance=tolerance)
     reports = evaluate_module.check(policy, data, assignment, graph)
@@ -70,13 +76,18 @@ def audit(
     split_column: Optional[str] = None,
     split_path: Optional[Path] = None,
     exact_max_n: int = DEFAULT_EXACT_MAX_N,
+    max_pairs: int = DEFAULT_MAX_PAIRS,
     skip_neighbours: bool = False,
     backend_overrides: Optional[Dict[str, str]] = None,
 ) -> Outcome:
     data = dataset_module.load_for(policy, data_path)
     assignment = load_assignment(data, split_column=split_column, split_path=split_path)
     graph = units_module.build(
-        policy, data, exact_max_n=exact_max_n, backend_overrides=backend_overrides
+        policy,
+        data,
+        exact_max_n=exact_max_n,
+        max_pairs=max_pairs,
+        backend_overrides=backend_overrides,
     )
     reports = evaluate_module.check(policy, data, assignment, graph)
     diagnostics = evaluate_module.diagnostics(
@@ -101,6 +112,7 @@ def verify(
     split_path: Optional[Path] = None,
     split_column: Optional[str] = None,
     exact_max_n: int = DEFAULT_EXACT_MAX_N,
+    max_pairs: int = DEFAULT_MAX_PAIRS,
     backend_overrides: Optional[Dict[str, str]] = None,
 ) -> cert_module.VerifyResult:
     certificate = cert_module.read(Path(certificate_path))
@@ -111,7 +123,11 @@ def verify(
     data = dataset_module.load_for(policy, target)
     assignment = load_assignment(data, split_column=split_column, split_path=split_path)
     graph = units_module.build(
-        policy, data, exact_max_n=exact_max_n, backend_overrides=backend_overrides
+        policy,
+        data,
+        exact_max_n=exact_max_n,
+        max_pairs=max_pairs,
+        backend_overrides=backend_overrides,
     )
     reports = evaluate_module.check(policy, data, assignment, graph)
     return cert_module.verify(certificate, data, assignment, reports, policy)

@@ -87,6 +87,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="skip the nearest-neighbour diagnostics (faster, less informative)",
     )
     common.add_argument(
+        "--max-pairs",
+        type=int,
+        default=None,
+        help="refuse rather than exhaust memory when a threshold relates this many pairs",
+    )
+    common.add_argument(
         "--require-exact",
         action="store_true",
         help="fail unless every constraint was proven by an exhaustive backend, not merely unviolated",
@@ -152,6 +158,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _pair_budget(args: argparse.Namespace) -> Dict[str, int]:
+    return {"max_pairs": args.max_pairs} if getattr(args, "max_pairs", None) else {}
+
+
 def _overrides(values: Sequence[str]) -> Dict[str, str]:
     out: Dict[str, str] = {}
     for item in values:
@@ -172,6 +182,7 @@ def _cmd_split(args: argparse.Namespace) -> int:
         data_path=args.data,
         tolerance=args.tolerance,
         exact_max_n=args.exact_max_n,
+        **_pair_budget(args),
         skip_neighbours=args.no_neighbours,
         backend_overrides=_overrides(args.backend),
     )
@@ -203,6 +214,7 @@ def _cmd_audit(args: argparse.Namespace) -> int:
         split_column=args.split_column,
         split_path=args.split,
         exact_max_n=args.exact_max_n,
+        **_pair_budget(args),
         skip_neighbours=args.no_neighbours,
         backend_overrides=_overrides(args.backend),
     )
@@ -230,6 +242,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         split_path=args.split,
         split_column=args.split_column,
         exact_max_n=args.exact_max_n,
+        **_pair_budget(args),
         backend_overrides=_overrides(args.backend),
     )
     if args.json:

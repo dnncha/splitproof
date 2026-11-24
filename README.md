@@ -135,6 +135,13 @@ backend computes exact k-mer Jaccard and says so. It is a real, reproducible,
 exactly-computed similarity — and it is not sequence identity, so it does not get that
 name.
 
+**It refuses to exhaust your memory.** The pair graph is quadratic in the worst case: a
+dataset where everything is related to everything at the declared threshold has as many
+edges as it has pairs. Edges are stored in numpy arrays rather than Python tuples, and
+past `--max-pairs` you get `TOO_MANY_PAIRS` with a remedy instead of an OOM kill. A
+2000-sequence single-family blob at 0.3 produces 1.9M edges in 0.8s; 5000 produces 11.7M
+in 4.9s and 233MB of edge storage.
+
 **It refuses impossible splits instead of producing bad ones.** If the largest connected
 unit cannot fit in any fold, you get `GIANT_UNIT` and an explanation: your data is one
 homology blob at that threshold, and a balanced split does not exist. Raise the

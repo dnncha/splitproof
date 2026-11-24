@@ -4,7 +4,16 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from . import EXACT, LOWER_BOUND, Neighbour, SimilarityBackend, SimilarityResult
+from . import (
+    DEFAULT_MAX_PAIRS,
+    EXACT,
+    LOWER_BOUND,
+    Neighbour,
+    PairSet,
+    SimilarityBackend,
+    SimilarityResult,
+    guard_pair_budget,
+)
 
 DEFAULT_K = {"protein": 5, "dna": 12, "rna": 12, "text": 4, "molecule": 4}
 
@@ -74,10 +83,18 @@ class ExactJaccard(SimilarityBackend):
     def install_hint(self) -> str:
         return "pip install cutsite (scipy is a core dependency)"
 
-    def pairs_above(self, values: Sequence[Optional[str]], kind: str, threshold: float) -> SimilarityResult:
+    def pairs_above(
+        self,
+        values: Sequence[Optional[str]],
+        kind: str,
+        threshold: float,
+        *,
+        max_pairs: int = DEFAULT_MAX_PAIRS,
+    ) -> SimilarityResult:
         k = kmer_size(kind)
         matrix, sizes, missing, vocab_size = _matrix(values, k)
-        pairs: List[Tuple[int, int, float]] = []
+        blocks: List[Tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+        found = 0
         n = matrix.shape[0]
         transposed = matrix.T.tocsr()
         step = _chunk_rows(np.diff(matrix.indptr))
@@ -86,8 +103,8 @@ class ExactJaccard(SimilarityBackend):
             block = (matrix[start:stop] @ transposed).tocoo()
             if block.nnz == 0:
                 continue
-            rows = block.row + start
-            cols = block.col
+            rows = block.row.astype(np.int64) + start
+            cols = block.col.astype(np.int64)
             inter = block.data
             keep = rows < cols
             if not keep.any():
@@ -97,9 +114,12 @@ class ExactJaccard(SimilarityBackend):
             with np.errstate(divide="ignore", invalid="ignore"):
                 sim = np.where(union > 0, inter / union, 0.0)
             hit = sim >= threshold
-            for i, j, s in zip(rows[hit], cols[hit], sim[hit]):
-                pairs.append((int(i), int(j), float(s)))
-        pairs.sort()
+            if not hit.any():
+                continue
+            found += int(hit.sum())
+            guard_pair_budget(found, max_pairs, self.name, threshold)
+            blocks.append((rows[hit], cols[hit], sim[hit].astype(np.float32)))
+        pairs = PairSet.from_blocks(blocks)
         notes: List[str] = []
         if missing:
             notes.append(f"{len(missing)} entities have no value for this key and are treated as unrelated")
@@ -208,7 +228,14 @@ class MinHashJaccard(SimilarityBackend):
             signatures[i] = permuted.min(axis=0)
         return signatures, token_sets, missing
 
-    def pairs_above(self, values: Sequence[Optional[str]], kind: str, threshold: float) -> SimilarityResult:
+    def pairs_above(
+        self,
+        values: Sequence[Optional[str]],
+        kind: str,
+        threshold: float,
+        *,
+        max_pairs: int = DEFAULT_MAX_PAIRS,
+    ) -> SimilarityResult:
         k = kmer_size(kind)
         bands, rows = self._bands(threshold)
         signatures, token_sets, missing = self._signatures(values, k)
@@ -226,7 +253,8 @@ class MinHashJaccard(SimilarityBackend):
                 for a_pos in range(len(members)):
                     for b_pos in range(a_pos + 1, len(members)):
                         candidates.add((members[a_pos], members[b_pos]))
-        pairs: List[Tuple[int, int, float]] = []
+            guard_pair_budget(len(candidates), max_pairs, self.name, threshold)
+        triples: List[Tuple[int, int, float]] = []
         for i, j in sorted(candidates):
             left, right = token_sets[i], token_sets[j]
             if left is None or right is None:
@@ -236,7 +264,8 @@ class MinHashJaccard(SimilarityBackend):
                 continue
             sim = len(left & right) / union
             if sim >= threshold:
-                pairs.append((i, j, float(sim)))
+                triples.append((i, j, float(sim)))
+        pairs = PairSet.from_triples(triples)
         notes = [
             "MinHash LSH finds most but not provably all pairs above the threshold, so the measured "
             "maximum is a lower bound; reported similarities themselves are exact",

@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from . import EXACT, Neighbour, SimilarityBackend, SimilarityResult
+from . import (
+    DEFAULT_MAX_PAIRS,
+    EXACT,
+    Neighbour,
+    PairSet,
+    SimilarityBackend,
+    SimilarityResult,
+    guard_pair_budget,
+)
 
 
 def _normalise(value: str) -> str:
@@ -20,7 +28,14 @@ class ExactDuplicate(SimilarityBackend):
     def install_hint(self) -> str:
         return "pip install cutsite"
 
-    def pairs_above(self, values: Sequence[Optional[str]], kind: str, threshold: float) -> SimilarityResult:
+    def pairs_above(
+        self,
+        values: Sequence[Optional[str]],
+        kind: str,
+        threshold: float,
+        *,
+        max_pairs: int = DEFAULT_MAX_PAIRS,
+    ) -> SimilarityResult:
         buckets: Dict[str, List[int]] = {}
         missing: List[int] = []
         for i, value in enumerate(values):
@@ -28,12 +43,13 @@ class ExactDuplicate(SimilarityBackend):
                 missing.append(i)
                 continue
             buckets.setdefault(_normalise(value), []).append(i)
-        pairs: List[Tuple[int, int, float]] = []
+        triples: List[Tuple[int, int, float]] = []
         for members in buckets.values():
             for a_pos in range(len(members)):
                 for b_pos in range(a_pos + 1, len(members)):
-                    pairs.append((members[a_pos], members[b_pos], 1.0))
-        pairs.sort()
+                    triples.append((members[a_pos], members[b_pos], 1.0))
+            guard_pair_budget(len(triples), max_pairs, self.name, threshold)
+        pairs = PairSet.from_triples(triples)
         notes = ["compares whitespace-stripped, upper-cased values for exact equality"]
         if missing:
             notes.append(f"{len(missing)} entities have no value for this key and are treated as unrelated")

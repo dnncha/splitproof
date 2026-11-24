@@ -6,7 +6,15 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from . import HEURISTIC, Neighbour, SimilarityBackend, SimilarityResult
+from . import (
+    DEFAULT_MAX_PAIRS,
+    HEURISTIC,
+    Neighbour,
+    PairSet,
+    SimilarityBackend,
+    SimilarityResult,
+    guard_pair_budget,
+)
 
 COVERAGE_DEFAULT = 0.8
 SENSITIVITY_DEFAULT = 7.5
@@ -104,7 +112,14 @@ class MMseqs2Identity(SimilarityBackend):
             for i in indices:
                 handle.write(f">s{i}\n{values[i]}\n")
 
-    def pairs_above(self, values: Sequence[Optional[str]], kind: str, threshold: float) -> SimilarityResult:
+    def pairs_above(
+        self,
+        values: Sequence[Optional[str]],
+        kind: str,
+        threshold: float,
+        *,
+        max_pairs: int = DEFAULT_MAX_PAIRS,
+    ) -> SimilarityResult:
         present = [i for i, value in enumerate(values) if value]
         missing = [i for i, value in enumerate(values) if not value]
         notes = [
@@ -113,7 +128,7 @@ class MMseqs2Identity(SimilarityBackend):
         ]
         if missing:
             notes.append(f"{len(missing)} entities have no sequence and are treated as unrelated")
-        pairs: List[Tuple[int, int, float]] = []
+        triples: List[Tuple[int, int, float]] = []
         if len(present) > 1:
             with tempfile.TemporaryDirectory(prefix="cutsite-mmseqs-") as workdir:
                 root = Path(workdir)
@@ -127,14 +142,15 @@ class MMseqs2Identity(SimilarityBackend):
                     check=True,
                 )
                 id_to_index = {f"s{i}": i for i in present}
-                pairs = parse_search_tsv(out.read_text(encoding="utf-8"), id_to_index)
+                triples = parse_search_tsv(out.read_text(encoding="utf-8"), id_to_index)
+                guard_pair_budget(len(triples), max_pairs, self.name, threshold)
         return SimilarityResult(
             backend=self.name,
             backend_version=self.version(),
             metric=self.metric,
             exactness=HEURISTIC,
             threshold=threshold,
-            pairs=pairs,
+            pairs=PairSet.from_triples(triples),
             missing=missing,
             notes=notes,
             params={"coverage": self.coverage, "sensitivity": self.sensitivity, "cov_mode": 0},
