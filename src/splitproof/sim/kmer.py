@@ -307,10 +307,13 @@ class MinHashJaccard(SimilarityBackend):
             for members in buckets.values():
                 if len(members) < 2:
                     continue
+                implied = len(members) * (len(members) - 1) // 2
+                guard_candidate_budget(
+                    len(candidates) + implied, max_pairs, self.name, threshold
+                )
                 for a_pos in range(len(members)):
                     for b_pos in range(a_pos + 1, len(members)):
                         candidates.add((members[a_pos], members[b_pos]))
-                guard_candidate_budget(len(candidates), max_pairs, self.name, threshold)
         collector = PairCollector(self.name, threshold, max_pairs)
         for i, j in sorted(candidates):
             left, right = token_sets[i], token_sets[j]

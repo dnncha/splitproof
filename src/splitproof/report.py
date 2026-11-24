@@ -70,7 +70,13 @@ def _unconstrained(certificate: Dict[str, Any]) -> int:
     total = 0
     for item in certificate.get("constraints", []):
         measured = item.get("measured") or {}
-        total = max(total, int(measured.get("values_absent") or 0) + int(measured.get("values_unparsable") or 0))
+        here = (
+            int(measured.get("values_absent") or 0)
+            + int(measured.get("values_unparsable") or 0)
+            + int(measured.get("missing_values") or 0)
+            + int(measured.get("items_without_a_date") or 0)
+        )
+        total = max(total, here)
     return total
 
 

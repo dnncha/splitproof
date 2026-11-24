@@ -252,7 +252,7 @@ def test_a_split_with_more_than_ten_folds_verifies_against_itself(tmp_path: Path
         {"kind": "similarity", "key": "sequence", "metric": "kmer_jaccard", "threshold": 0.3}
     ]
     _outcome, split_path, cert_path = _certify(tmp_path, payload, "many")
-    result = api.verify(cert_path, split_path=split_path)
+    result = api.verify(cert_path, split_path=split_path, data_path=Path(payload["dataset"]["path"]))
     assert result.ok, [check for check in result.checks if not check["ok"]]
 
 
@@ -268,7 +268,7 @@ def test_verify_rejects_a_boolean_swapped_for_a_number(tmp_path: Path):
     certificate = json.loads(cert_path.read_text(encoding="utf-8"))
     certificate["units"]["singleton_units"] = True
     cert_path.write_text(json.dumps(certificate), encoding="utf-8")
-    result = api.verify(cert_path, split_path=split_path)
+    result = api.verify(cert_path, split_path=split_path, data_path=Path(payload["dataset"]["path"]))
     assert not result.ok
     assert result.to_dict()["constraints"], "verify must report the constraints it re-measured"
 
@@ -389,3 +389,92 @@ def test_a_policy_cannot_name_an_executable_for_a_backend(tmp_path: Path):
         api.make_split(Policy.from_dict(payload))
     assert "binary" in error.value.details["given"]
     assert "binary" not in error.value.details["accepted"]
+
+
+def test_a_dropped_split_verifies_against_its_own_certificate(tmp_path: Path):
+    """Round 2 wired audit-input checks into verify and broke on_span: drop.
+
+    write_split records policy-dropped rows with the internal sentinel, which the new
+    check refused, so any split with a spanning unit could not be verified at all.
+    """
+    payload = _policy(_straddling(tmp_path))
+    payload["constraints"].append(
+        {"kind": "temporal", "key": "deposited", "cutoff": "2025-01-01", "on_span": "drop"}
+    )
+    outcome, split_path, cert_path = _certify(tmp_path, payload, "dropped")
+    assert outcome.certificate["assignment"]["dropped"] > 0
+    result = api.verify(
+        cert_path, split_path=split_path, data_path=Path(payload["dataset"]["path"])
+    )
+    assert result.ok, [check for check in result.checks if not check["ok"]]
+
+
+def test_a_holdout_with_numbered_fold_names_verifies(tmp_path: Path):
+    rows = make_rows(families=10, members=3, seed=81)
+    payload = _policy(
+        write_csv(tmp_path / "numbered.csv", rows),
+        scheme={"kind": "holdout", "fractions": {"s2": 0.5, "s10": 0.5}},
+    )
+    outcome, split_path, cert_path = _certify(tmp_path, payload, "numbered")
+    assert outcome.assignment.folds == ["s2", "s10"]
+    result = api.verify(
+        cert_path, split_path=split_path, data_path=Path(payload["dataset"]["path"])
+    )
+    assert result.ok, [check for check in result.checks if not check["ok"]]
+
+
+def test_thresholds_that_print_alike_are_still_distinct_constraints(tmp_path: Path):
+    rows = make_rows(families=10, members=3, seed=82)
+    payload = _policy(write_csv(tmp_path / "alike.csv", rows))
+    payload["constraints"] = [
+        {"kind": "similarity", "key": "sequence", "metric": "kmer_jaccard", "threshold": 0.5},
+        {
+            "kind": "similarity",
+            "key": "sequence",
+            "metric": "kmer_jaccard",
+            "threshold": 0.5000004,
+        },
+    ]
+    outcome = api.make_split(Policy.from_dict(payload))
+    assert len({report.id for report in outcome.reports}) == 2
+    assert len(outcome.certificate["units"]["similarity"]) == 2
+
+
+def test_an_exactly_repeated_constraint_is_refused(tmp_path: Path):
+    rows = make_rows(families=6, members=2, seed=83)
+    payload = _policy(write_csv(tmp_path / "dupe-constraint.csv", rows))
+    payload["constraints"] = payload["constraints"] * 2
+    with pytest.raises(PolicyError) as error:
+        Policy.from_dict(payload)
+    assert "repeats" in error.value.message
+
+
+def test_verify_will_not_follow_a_data_path_the_certificate_chose(tmp_path: Path):
+    import json
+
+    from splitproof.errors import DataError
+
+    rows = make_rows(families=8, members=3, seed=84)
+    payload = _policy(write_csv(tmp_path / "source.csv", rows))
+    _outcome, split_path, cert_path = _certify(tmp_path, payload, "source")
+    certificate = json.loads(cert_path.read_text(encoding="utf-8"))
+    certificate["source"]["path"] = "/etc/hosts"
+    cert_path.write_text(json.dumps(certificate), encoding="utf-8")
+    with pytest.raises(DataError) as error:
+        api.verify(cert_path, split_path=split_path)
+    assert "outside this directory" in error.value.message
+
+
+def test_a_key_populated_on_one_row_is_not_proven(tmp_path: Path):
+    rows = make_rows(families=6, members=3, seed=85)
+    for position, row in enumerate(rows):
+        row["fold"] = "train" if position % 2 else "test"
+        if position:
+            row["sequence"] = ""
+    path = write_csv(tmp_path / "sparse.csv", rows)
+    outcome = api.audit(
+        Policy.from_dict(_policy(path)), split_column="fold", skip_neighbours=True
+    )
+    assert outcome.certificate["status"] == "satisfied_unproven"
+    assert outcome.reports[0].measured["values_absent"] == len(rows) - 1
+    assert any("unconstrained" in note for note in outcome.reports[0].notes)

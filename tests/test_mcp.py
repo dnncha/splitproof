@@ -55,7 +55,8 @@ def test_malformed_line_returns_a_parse_error():
     assert json.loads(stdout.getvalue())["error"]["code"] == -32700
 
 
-def test_split_tool_writes_files_and_reports_status(policy_dict, tmp_path: Path):
+def test_split_tool_writes_files_and_reports_status(policy_dict, tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     policy_path = tmp_path / "policy.json"
     policy_path.write_text(json.dumps(policy_dict), encoding="utf-8")
     result = mcp.call_tool(
@@ -74,7 +75,8 @@ def test_split_tool_writes_files_and_reports_status(policy_dict, tmp_path: Path)
     assert "summary" in payload
 
 
-def test_audit_tool_flags_a_leaky_split(policy_dict, tmp_path: Path, rows):
+def test_audit_tool_flags_a_leaky_split(policy_dict, tmp_path: Path, rows, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     from conftest import write_csv
 
     for position, row in enumerate(rows):
@@ -118,6 +120,59 @@ def test_verify_tool_round_trips(policy_dict, tmp_path: Path):
     cert_path = tmp_path / "cert.json"
     api.write_split(split_path, outcome.data, outcome.assignment, "accession")
     cert_module.write(cert_path, outcome.certificate)
-    result = mcp.call_tool("splitproof_verify", {"cert": str(cert_path), "split": str(split_path)})
+    result = mcp.call_tool(
+        "splitproof_verify",
+        {
+            "cert": str(cert_path),
+            "split": str(split_path),
+            "data": str(outcome.data.path),
+        },
+    )
     assert not result["isError"]
     assert result["structuredContent"]["ok"] is True
+
+
+def test_a_tool_refuses_to_write_outside_the_working_directory(policy_dict, tmp_path: Path, monkeypatch):
+    """The guard for a real exposure: these arguments can come from untrusted content.
+
+    An agent reading a report or certificate someone else wrote could be steered into
+    passing an absolute path, and the server would have written there.
+    """
+    monkeypatch.chdir(tmp_path)
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(json.dumps(policy_dict), encoding="utf-8")
+    result = mcp.call_tool(
+        "splitproof_split",
+        {"policy": str(policy_path), "out": "/tmp/splitproof-escape.csv"},
+    )
+    assert result["isError"]
+    assert "outside the working directory" in result["structuredContent"]["error"]["message"]
+    assert not Path("/tmp/splitproof-escape.csv").exists()
+
+
+def test_a_non_object_message_does_not_kill_the_server():
+    stdout = io.StringIO()
+    mcp.serve(stdin=io.StringIO('["not", "an", "object"]\n'), stdout=stdout)
+    assert json.loads(stdout.getvalue())["error"]["code"] == -32600
+
+
+def test_a_malformed_tool_call_returns_an_error_not_a_crash(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    responses = []
+    stdout = io.StringIO()
+    mcp.serve(
+        stdin=io.StringIO(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "splitproof_split", "arguments": "not-a-mapping"},
+                }
+            )
+            + "\n"
+        ),
+        stdout=stdout,
+    )
+    responses = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()]
+    assert responses[0]["result"]["isError"]

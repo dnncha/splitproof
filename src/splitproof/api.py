@@ -130,11 +130,14 @@ def verify(
 ) -> cert_module.VerifyResult:
     certificate = cert_module.read(Path(certificate_path))
     policy = cert_module.policy_from(certificate)
-    target = data_path
-    if target is None and certificate.get("source", {}).get("path"):
-        target = Path(certificate["source"]["path"])
+    target = data_path or _recorded_source(certificate)
     data = dataset_module.load_for(policy, target)
-    assignment = load_assignment(data, split_column=split_column, split_path=split_path)
+    assignment = load_assignment(
+        data,
+        split_column=split_column,
+        split_path=split_path,
+        allow_dropped=bool(certificate.get("assignment", {}).get("dropped")),
+    )
     graph = units_module.build(
         policy,
         data,
@@ -161,18 +164,19 @@ def load_assignment(
     *,
     split_column: Optional[str] = None,
     split_path: Optional[Path] = None,
+    allow_dropped: bool = False,
 ) -> Assignment:
     if split_column:
-        return assign_module.from_column(data, split_column)
+        return assign_module.from_column(data, split_column, allow_dropped=allow_dropped)
     if split_path:
-        return _from_split_file(data, Path(split_path))
+        return _from_split_file(data, Path(split_path), allow_dropped=allow_dropped)
     raise DataError(
         "no existing split given",
         remedy="Pass --split-column for a column in the data file, or --split for a two-column file.",
     )
 
 
-def _from_split_file(data: Dataset, path: Path) -> Assignment:
+def _from_split_file(data: Dataset, path: Path, *, allow_dropped: bool = False) -> Assignment:
     if not path.exists():
         raise DataError(f"split file not found: {path}", details={"path": str(path)})
     delimiter = "\t" if path.suffix.lower() in {".tsv", ".tab"} else ","
@@ -225,13 +229,49 @@ def _from_split_file(data: Dataset, path: Path) -> Assignment:
     fold_of: Dict[int, str] = {}
     counts: Dict[str, int] = {}
     for i, entity_id in enumerate(data.ids):
-        fold = mapping.get(entity_id, DROPPED)
+        fold = mapping.get(entity_id, assign_module.UNASSIGNED)
         fold_of[i] = fold
         counts[fold] = counts.get(fold, 0) + 1
-    assign_module.check_audit_folds(data, fold_of, f"split file {path.name}")
-    folds = sorted((name for name in counts if name != DROPPED), key=assign_module.fold_order)
+    assign_module.check_audit_folds(
+        data, fold_of, f"split file {path.name}", allow_dropped=allow_dropped
+    )
+    folds = sorted(
+        (name for name in counts if name not in {DROPPED, assign_module.UNASSIGNED}),
+        key=assign_module.fold_order,
+    )
     stats = [FoldStat(name=name, target=counts[name], count=counts[name], units=0) for name in folds]
-    return Assignment(fold_of=fold_of, folds=folds, stats=stats, dropped=[])
+    dropped = sorted(i for i, fold in fold_of.items() if fold == DROPPED)
+    return Assignment(fold_of=fold_of, folds=folds, stats=stats, dropped=dropped)
+
+
+def _recorded_source(certificate: Dict[str, Any]) -> Path:
+    """The data path a certificate recorded, accepted only if it stays inside the tree.
+
+    A certificate is untrusted input, and verify reads whatever file this names. An
+    absolute path, or one climbing out with '..', would let a certificate make verify
+    read a file elsewhere on the machine, or verify cleanly against a decoy.
+    """
+    recorded = (certificate.get("source") or {}).get("path") if isinstance(
+        certificate.get("source"), dict
+    ) else None
+    if not recorded:
+        raise DataError(
+            "the certificate records no data path, so there is nothing to verify against",
+            remedy="Pass --data with the file the split was built from.",
+        )
+    candidate = Path(str(recorded))
+    root = Path.cwd().resolve()
+    resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+    if root != resolved and root not in resolved.parents:
+        raise DataError(
+            f"the certificate points at {recorded!r}, which is outside this directory",
+            remedy=(
+                "Pass --data explicitly. splitproof will not follow a path chosen by the "
+                "certificate out of the working tree, because a certificate is untrusted input."
+            ),
+            details={"recorded": str(recorded), "working_directory": str(root)},
+        )
+    return candidate
 
 
 def write_split(path: Path, data: Dataset, assignment: Assignment, id_column: str) -> None:

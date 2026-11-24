@@ -112,6 +112,29 @@ def _path(value: Optional[str]) -> Optional[Path]:
     return Path(value) if value else None
 
 
+def _writable(value: Optional[str], default: str) -> Path:
+    """Where a tool may write: inside the working tree, and nowhere else.
+
+    An agent reaches these arguments from whatever it was reading, which may be an
+    untrusted report or certificate, so an unconfined path is a way to overwrite files
+    elsewhere on the machine.
+    """
+    candidate = Path(str(value)) if value else Path(default)
+    root = Path.cwd().resolve()
+    resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+    if root != resolved and root not in resolved.parents:
+        raise SplitproofError(
+            f"refusing to write outside the working directory: {candidate}",
+            remedy=(
+                "Pass a path inside the current directory. Writes are confined because these "
+                "arguments can come from content the agent was reading."
+            ),
+            details={"requested": str(candidate), "working_directory": str(root)},
+        )
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    return resolved
+
+
 def _summarise(certificate: Dict[str, Any], extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     payload = {
         "status": certificate["status"],
@@ -128,7 +151,7 @@ def _summarise(certificate: Dict[str, Any], extra: Optional[Dict[str, Any]] = No
 def _do_init(arguments: Dict[str, Any]) -> Dict[str, Any]:
     from .cli import guess_policy, _write_policy
 
-    out = Path(arguments.get("out") or "policy.yaml")
+    out = _writable(arguments.get("out"), "policy.yaml")
     policy, seen = guess_policy(Path(arguments["data"]), arguments.get("id_column"))
     _write_policy(out, policy)
     return {
@@ -152,12 +175,12 @@ def _do_split(arguments: Dict[str, Any]) -> Dict[str, Any]:
         tolerance=float(arguments.get("tolerance", api.DEFAULT_TOLERANCE)),
         skip_neighbours=bool(arguments.get("skip_neighbours", False)),
     )
-    out = Path(arguments.get("out") or "split.csv")
-    certificate_path = Path(arguments.get("cert") or "splitproof.cert.json")
+    out = _writable(arguments.get("out"), "split.csv")
+    certificate_path = _writable(arguments.get("cert"), "splitproof.cert.json")
     api.write_split(out, outcome.data, outcome.assignment, policy.dataset.id_column)
     cert_module.write(certificate_path, outcome.certificate)
     if arguments.get("report"):
-        Path(arguments["report"]).write_text(
+        _writable(arguments["report"], "report.md").write_text(
             report_module.markdown(outcome.certificate), encoding="utf-8"
         )
     ok = outcome.ok
@@ -179,9 +202,9 @@ def _do_audit(arguments: Dict[str, Any]) -> Dict[str, Any]:
         skip_neighbours=bool(arguments.get("skip_neighbours", False)),
     )
     if arguments.get("cert"):
-        cert_module.write(Path(arguments["cert"]), outcome.certificate)
+        cert_module.write(_writable(arguments["cert"], "audit.cert.json"), outcome.certificate)
     if arguments.get("report"):
-        Path(arguments["report"]).write_text(
+        _writable(arguments["report"], "leakage.md").write_text(
             report_module.markdown(outcome.certificate), encoding="utf-8"
         )
     return _summarise(outcome.certificate, {"ok": outcome.ok})
@@ -248,8 +271,15 @@ def call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     except SplitproofError as error:
         payload = {"ok": False, "error": error.to_dict()}
         failed = True
-    except (OSError, ValueError, KeyError) as error:
-        payload = {"ok": False, "error": {"code": "UNEXPECTED", "message": str(error)}}
+    except Exception as error:
+        payload = {
+            "ok": False,
+            "error": {
+                "code": "UNEXPECTED",
+                "message": f"{type(error).__name__}: {error}",
+                "remedy": "This is a bug in splitproof. Please report it with the inputs.",
+            },
+        }
         failed = True
     return {
         "isError": failed,
@@ -258,7 +288,13 @@ def call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def handle(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def handle(message: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(message, dict):
+        return {
+            "jsonrpc": "2.0",
+            "id": None,
+            "error": {"code": -32600, "message": "a JSON-RPC message must be an object"},
+        }
     method = message.get("method")
     identifier = message.get("id")
     if method == "initialize":
@@ -285,8 +321,13 @@ def handle(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if method == "tools/list":
         return _result(identifier, {"tools": TOOLS})
     if method == "tools/call":
-        params = message.get("params") or {}
-        return _result(identifier, call_tool(params.get("name", ""), params.get("arguments") or {}))
+        params = message.get("params")
+        if not isinstance(params, dict):
+            params = {}
+        arguments = params.get("arguments")
+        if not isinstance(arguments, dict):
+            arguments = {}
+        return _result(identifier, call_tool(str(params.get("name") or ""), arguments))
     if identifier is None:
         return None
     return {

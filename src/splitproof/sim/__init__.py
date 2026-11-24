@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
+import math
+
 import numpy as np
 
 from ..errors import BackendUnavailable, SplitproofError
@@ -156,9 +158,10 @@ def guard_candidate_budget(count: int, max_pairs: int, backend: str, threshold: 
     """Refuse before enumerating a quadratic candidate set.
 
     LSH candidate generation happens before any similarity is known, so it has to be
-    bounded on its own. The count is the sum over buckets of their implied pairs, which
-    over-counts anything colliding in more than one band, so this refuses no later than
-    the true candidate count would.
+    bounded on its own. The count is what the set already holds plus what the bucket
+    about to be enumerated implies, charged before a single tuple is built, because a
+    bucket of m members implies m(m-1)/2 distinct pairs and one bucket alone can
+    exhaust memory.
     """
     if count <= max_pairs:
         return
@@ -319,21 +322,26 @@ def construct(cls, settings: Dict[str, Any]):
     checked: Dict[str, Any] = {}
     for key, value in settings.items():
         kind, low, high = allowed[key]
-        if kind is int and isinstance(value, bool):
+        if isinstance(value, bool):
             raise BackendUnavailable(
-                f"{name}.{key} must be a whole number, got a boolean",
+                f"{name}.{key} must be a number, got a boolean",
                 details={"backend": name, "param": key},
+            )
+        if kind is int and isinstance(value, float) and value != int(value):
+            raise BackendUnavailable(
+                f"{name}.{key} must be a whole number, got {value!r}",
+                details={"backend": name, "param": key, "value": str(value)},
             )
         try:
             coerced = kind(value)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise BackendUnavailable(
                 f"{name}.{key} must be {kind.__name__}, got {value!r}",
                 details={"backend": name, "param": key, "value": str(value)},
             ) from exc
-        if kind is float and coerced != coerced:
+        if isinstance(coerced, float) and not math.isfinite(coerced):
             raise BackendUnavailable(
-                f"{name}.{key} must be a finite number",
+                f"{name}.{key} must be a finite number, got {value!r}",
                 details={"backend": name, "param": key},
             )
         if (low is not None and coerced < low) or (high is not None and coerced > high):

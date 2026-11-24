@@ -326,17 +326,22 @@ def fold_order(name: str) -> Tuple[Any, ...]:
     certificate once there were more than ten folds.
     """
     parts = re.split(r"(\d+)", name)
-    return tuple(int(part) if part.isdigit() else part for part in parts)
+    return tuple(int(part) if part.isdigit() else part for part in parts) + (name,)
 
 
-def check_audit_folds(data: Dataset, fold_of: Dict[int, str], source: str) -> None:
+UNASSIGNED = "__unassigned__"
+
+
+def check_audit_folds(
+    data: Dataset, fold_of: Dict[int, str], source: str, *, allow_dropped: bool = False
+) -> None:
     """An audited split must say where every entity went.
 
     Each of these silently excluded rows from every check and still certified the
     rest clean: a blank cell, the internal __dropped__ sentinel, and a split with
     only one fold (which trivially has no crossing pairs).
     """
-    blank = sorted(data.ids[i] for i, fold in fold_of.items() if fold == DROPPED)
+    blank = sorted(data.ids[i] for i, fold in fold_of.items() if fold == UNASSIGNED)
     if blank:
         raise DataError(
             f"{len(blank)} entities have no fold in {source}",
@@ -347,7 +352,16 @@ def check_audit_folds(data: Dataset, fold_of: Dict[int, str], source: str) -> No
             details={"missing": len(blank), "examples": blank[:10]},
         )
     reserved = sorted(data.ids[i] for i, fold in fold_of.items() if fold == DROPPED)
-    folds = {fold for fold in fold_of.values()}
+    if reserved and not allow_dropped:
+        raise DataError(
+            f"{source} uses the reserved fold name {DROPPED!r}",
+            remedy=(
+                "That name is internal to splitproof, which uses it for rows a policy drops. "
+                "Rename the fold."
+            ),
+            details={"examples": reserved[:10]},
+        )
+    folds = {fold for fold in fold_of.values() if fold != DROPPED}
     if "" in folds:
         raise DataError(
             f"{source} contains an empty fold name",
@@ -363,26 +377,23 @@ def check_audit_folds(data: Dataset, fold_of: Dict[int, str], source: str) -> No
             ),
             details={"folds": sorted(folds), "entities": len(data)},
         )
-    if reserved:
-        raise DataError(
-            f"{source} uses the reserved fold name {DROPPED!r}",
-            remedy="That name is internal to splitproof. Rename the fold.",
-            details={"examples": reserved[:10]},
-        )
 
 
-def from_column(data: Dataset, column: str) -> Assignment:
+def from_column(data: Dataset, column: str, *, allow_dropped: bool = False) -> Assignment:
     values = data.column(column)
     fold_of: Dict[int, str] = {}
     counts: Dict[str, int] = {}
     for i, value in enumerate(values):
-        fold = value if value is not None else DROPPED
+        fold = value if value is not None else UNASSIGNED
         fold_of[i] = fold
         counts[fold] = counts.get(fold, 0) + 1
-    check_audit_folds(data, fold_of, f"column '{column}'")
-    folds = sorted((name for name in counts if name != DROPPED), key=fold_order)
+    check_audit_folds(data, fold_of, f"column '{column}'", allow_dropped=allow_dropped)
+    folds = sorted(
+        (name for name in counts if name not in {DROPPED, UNASSIGNED}), key=fold_order
+    )
     stats = [
         FoldStat(name=name, target=counts[name], count=counts[name], units=0, label_counts={})
         for name in folds
     ]
-    return Assignment(fold_of=fold_of, folds=folds, stats=stats, dropped=[])
+    dropped = sorted(i for i, fold in fold_of.items() if fold == DROPPED)
+    return Assignment(fold_of=fold_of, folds=folds, stats=stats, dropped=dropped)

@@ -54,7 +54,7 @@ def build(
             "entities": len(data),
             "id_column": policy.dataset.id_column,
         },
-        "source": {"path": str(data.path) if data.path else None},
+        "source": {"path": _relative_source(data.path)},
         "assignment": {
             "digest": assignment_digest(data, assignment),
             **assignment.to_dict(),
@@ -68,6 +68,20 @@ def build(
             "platform": platform.system().lower(),
         },
     }
+
+
+def _relative_source(path: Optional[Path]) -> Optional[str]:
+    """Where the data was, recorded relative to the working directory when it is inside it.
+
+    verify will follow a relative path but not an absolute one, because a certificate
+    is untrusted input and must not be able to point verify at a file of its choosing.
+    """
+    if path is None:
+        return None
+    try:
+        return str(Path(path).resolve().relative_to(Path.cwd().resolve()))
+    except ValueError:
+        return str(Path(path).resolve())
 
 
 def write(path: Path, certificate: Dict[str, Any]) -> None:
@@ -89,7 +103,11 @@ def read(path: Path) -> Dict[str, Any]:
             details={"path": str(path)},
         )
     header = loaded.get("splitproof")
-    if not isinstance(header, dict) or not isinstance(header.get("schema"), int):
+    if (
+        not isinstance(header, dict)
+        or not isinstance(header.get("schema"), int)
+        or isinstance(header.get("schema"), bool)
+    ):
         raise CertificateMismatch(
             f"{path} has no readable splitproof schema header",
             remedy="Pass the splitproof.cert.json produced by 'splitproof split'.",
@@ -122,7 +140,13 @@ class VerifyResult:
 
 
 def policy_from(certificate: Dict[str, Any]) -> Policy:
-    return Policy.from_dict(certificate["policy"])
+    policy = certificate.get("policy")
+    if not isinstance(policy, dict):
+        raise CertificateMismatch(
+            "the certificate carries no policy, so there is nothing to verify against",
+            remedy="Pass a certificate produced by 'splitproof split' or 'splitproof audit'.",
+        )
+    return Policy.from_dict(policy)
 
 
 VOLATILE = ("created", "environment", "audited", "source")
@@ -207,7 +231,10 @@ def verify(
         )
     extra = sorted((set(stored) | set(fresh)) - {name for name, _ in SECTIONS})
     for name in extra:
-        difference = first_difference(stored.get(name), fresh.get(name), name)
+        if name not in fresh:
+            difference = f"{name} is in the certificate but splitproof does not produce it"
+        else:
+            difference = first_difference(stored.get(name), fresh.get(name), name)
         checks.append(
             {
                 "name": name,

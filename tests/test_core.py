@@ -252,7 +252,7 @@ def test_verify_accepts_an_untouched_split(policy_dict, tmp_path: Path):
     cert_path = tmp_path / "splitproof.cert.json"
     api.write_split(split_path, outcome.data, outcome.assignment, "accession")
     cert_module.write(cert_path, outcome.certificate)
-    result = api.verify(cert_path, split_path=split_path)
+    result = api.verify(cert_path, split_path=split_path, data_path=Path(policy_dict["dataset"]["path"]))
     assert result.ok
     assert all(check["ok"] for check in result.checks)
 
@@ -271,7 +271,7 @@ def test_verify_rejects_a_swapped_assignment(policy_dict, tmp_path: Path):
         entity_id, fold = line.split(",")
         flipped.append(f"{entity_id},{'test' if fold == 'train' else 'train'}")
     split_path.write_text("\n".join([header] + flipped) + "\n", encoding="utf-8")
-    result = api.verify(cert_path, split_path=split_path)
+    result = api.verify(cert_path, split_path=split_path, data_path=Path(policy_dict["dataset"]["path"]))
     assert not result.ok
     assert any(check["name"] == "assignment" and not check["ok"] for check in result.checks)
 
@@ -286,7 +286,7 @@ def test_verify_rejects_edited_data(policy_dict, tmp_path: Path):
     data_path = Path(policy_dict["dataset"]["path"])
     text = data_path.read_text(encoding="utf-8").replace("D0", "D5")
     data_path.write_text(text, encoding="utf-8")
-    result = api.verify(cert_path, split_path=split_path)
+    result = api.verify(cert_path, split_path=split_path, data_path=Path(policy_dict["dataset"]["path"]))
     assert not result.ok
     assert any(check["name"] == "dataset" and not check["ok"] for check in result.checks)
 
@@ -360,7 +360,7 @@ def test_verify_rejects_an_edited_constraint_measurement(policy_dict, tmp_path: 
         certificate["constraints"][0]["measured"]["pairs_at_or_above_threshold"] = 999999
 
     _retamper(cert_path, mutate)
-    result = api.verify(cert_path, split_path=split_path)
+    result = api.verify(cert_path, split_path=split_path, data_path=Path(policy_dict["dataset"]["path"]))
     assert not result.ok
     failed = next(check for check in result.checks if not check["ok"])
     assert failed["name"] == "constraints"
@@ -375,7 +375,7 @@ def test_verify_rejects_an_edited_diagnostic(policy_dict, tmp_path: Path):
             entry["nearest_neighbour_baseline"]["value"] = -0.5
 
     _retamper(cert_path, mutate)
-    result = api.verify(cert_path, split_path=split_path)
+    result = api.verify(cert_path, split_path=split_path, data_path=Path(policy_dict["dataset"]["path"]))
     assert not result.ok
     assert any(check["name"] == "diagnostics" and not check["ok"] for check in result.checks)
 
@@ -383,7 +383,7 @@ def test_verify_rejects_an_edited_diagnostic(policy_dict, tmp_path: Path):
 def test_verify_rejects_an_edited_unit_summary(policy_dict, tmp_path: Path):
     _outcome, split_path, cert_path = _certified(policy_dict, tmp_path)
     _retamper(cert_path, lambda c: c["units"].__setitem__("largest_unit_fraction", 0.01))
-    result = api.verify(cert_path, split_path=split_path)
+    result = api.verify(cert_path, split_path=split_path, data_path=Path(policy_dict["dataset"]["path"]))
     assert not result.ok
     assert any(check["name"] == "units" and not check["ok"] for check in result.checks)
 
@@ -391,7 +391,7 @@ def test_verify_rejects_an_edited_unit_summary(policy_dict, tmp_path: Path):
 def test_verify_rejects_a_downgraded_status(policy_dict, tmp_path: Path):
     _outcome, split_path, cert_path = _certified(policy_dict, tmp_path)
     _retamper(cert_path, lambda c: c.__setitem__("status", "violated"))
-    result = api.verify(cert_path, split_path=split_path)
+    result = api.verify(cert_path, split_path=split_path, data_path=Path(policy_dict["dataset"]["path"]))
     assert not result.ok
     assert any(check["name"] == "status" and not check["ok"] for check in result.checks)
 
@@ -404,7 +404,7 @@ def test_verify_rejects_an_edited_backend_parameter(policy_dict, tmp_path: Path)
             entry["params"]["k"] = 99
 
     _retamper(cert_path, mutate)
-    result = api.verify(cert_path, split_path=split_path)
+    result = api.verify(cert_path, split_path=split_path, data_path=Path(policy_dict["dataset"]["path"]))
     assert not result.ok
     assert any(check["name"] == "units" and not check["ok"] for check in result.checks)
 
@@ -412,7 +412,7 @@ def test_verify_rejects_an_edited_backend_parameter(policy_dict, tmp_path: Path)
 def test_verify_reports_the_first_difference_precisely(policy_dict, tmp_path: Path):
     _outcome, split_path, cert_path = _certified(policy_dict, tmp_path)
     _retamper(cert_path, lambda c: c["dataset"].__setitem__("entities", 1))
-    result = api.verify(cert_path, split_path=split_path)
+    result = api.verify(cert_path, split_path=split_path, data_path=Path(policy_dict["dataset"]["path"]))
     failed = next(check for check in result.checks if not check["ok"])
     assert "dataset.entities" in failed["difference"]
     assert "certificate says 1" in failed["difference"]

@@ -23,6 +23,43 @@ _HINT = (
 )
 
 
+def _standardisers():
+    from rdkit.Chem import SaltRemover
+    from rdkit.Chem.MolStandardize import rdMolStandardize
+
+    return (
+        SaltRemover.SaltRemover(),
+        rdMolStandardize.LargestFragmentChooser(),
+        rdMolStandardize.Uncharger(),
+    )
+
+
+def standardise(chemistry, molecule):
+    """One molecule, comparable across salt form, charge state and fragment order.
+
+    Counterions in RDKit's salt dictionary are stripped first, which handles the
+    common pharmaceutical salts. If fragments still remain the largest is chosen,
+    which is deterministic but picks the counterion when an unusual one outweighs the
+    drug: embonate, for instance, is heavier than metformin and is not in the
+    dictionary. That case errs toward separating a duplicate rather than merging two
+    different compounds, so it misses leakage rather than inventing it, and the notes
+    say so.
+
+    Charges are then neutralised, so sodium aspirinate and aspirin, and amphetamine
+    hydrochloride and amphetamine, are one compound.
+    """
+    remover, largest, uncharger = _standardisers()
+    stripped = remover.StripMol(molecule, dontRemoveEverything=True)
+    if stripped is not None and stripped.GetNumHeavyAtoms():
+        molecule = stripped
+    if len(chemistry.GetMolFrags(molecule)) > 1:
+        molecule = largest.choose(molecule)
+    try:
+        return uncharger.uncharge(molecule)
+    except Exception:
+        return molecule
+
+
 def _rdkit():
     try:
         from rdkit import Chem, RDLogger
@@ -53,9 +90,7 @@ def ring_systems(chemistry, molecule) -> Optional[str]:
     MurckoScaffoldSmiles, whose MurckoDecompose raises on every input in RDKit
     2026.09.
     """
-    fragments = chemistry.GetMolFrags(molecule, asMols=True, sanitizeFrags=False)
-    if len(fragments) > 1:
-        molecule = max(fragments, key=lambda fragment: fragment.GetNumHeavyAtoms())
+    molecule = standardise(chemistry, molecule)
     chemistry.FastFindRings(molecule)
     chemistry.RemoveStereochemistry(molecule)
     info = molecule.GetRingInfo()
@@ -128,7 +163,7 @@ class MorganTanimoto(_ChemBackend):
                 if value:
                     unparsable.append(i)
                 continue
-            prints.append(generator.GetFingerprint(molecule))
+            prints.append(generator.GetFingerprint(standardise(Chem, molecule)))
         return prints, missing, unparsable
 
     def pairs_above(
@@ -152,7 +187,10 @@ class MorganTanimoto(_ChemBackend):
             for j, sim in zip(tail, sims):
                 if sim >= threshold:
                     collector.add(i, j, sim)
-        notes = ["Morgan/ECFP fingerprints compared by Tanimoto; computed over all pairs, so exact"]
+        notes = [
+            "Morgan/ECFP fingerprints of the desalted, neutral molecule, compared by Tanimoto; "
+            "computed over all pairs, so exact"
+        ]
         if unparsable:
             notes.append(f"{len(unparsable)} entities hold SMILES that RDKit could not parse")
         absent = len(missing) - len(unparsable)
@@ -221,10 +259,7 @@ class CanonicalSmiles(_ChemBackend):
                 if value:
                     unparsable.append(i)
                 continue
-            fragments = Chem.GetMolFrags(molecule, asMols=True, sanitizeFrags=False)
-            if len(fragments) > 1:
-                molecule = max(fragments, key=lambda fragment: fragment.GetNumHeavyAtoms())
-            out.append(Chem.MolToSmiles(molecule, canonical=True))
+            out.append(Chem.MolToSmiles(standardise(Chem, molecule), canonical=True))
         return out, missing, unparsable
 
     def pairs_above(
@@ -239,9 +274,10 @@ class CanonicalSmiles(_ChemBackend):
         groups: List[Optional[str]] = list(canonical)
         distinct = len({value for value in canonical if value})
         notes = [
-            "compares RDKit canonical SMILES of the largest covalent fragment, so a salt and "
+            "compares RDKit canonical SMILES of the desalted, neutral molecule, so a salt and "
             "its parent and two spellings of one molecule are the same compound, while "
-            "enantiomers are not"
+            "enantiomers are not. A counterion outside RDKit's salt dictionary that outweighs "
+            "the drug is kept instead, which separates that pair rather than merging a wrong one"
         ]
         if unparsable:
             notes.append(f"{len(unparsable)} entities hold SMILES that RDKit could not parse")

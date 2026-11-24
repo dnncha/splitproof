@@ -91,11 +91,11 @@ Every split writes a `splitproof.cert.json`: small, diffable, and safe to commit
   "constraints": [
     {
       "id": "sequence:identity@0.3",
-      "status": "satisfied",
+      "status": "satisfied_unproven",
       "measured": {
         "cross_fold_pairs_at_or_above_threshold": 0,
-        "exactness": "exact",
-        "backend": "exact_jaccard"
+        "exactness": "heuristic",
+        "backend": "mmseqs2"
       }
     }
   ]

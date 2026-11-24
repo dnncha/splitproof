@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from .dataset import Dataset
 from .digest import digest
-from .errors import PolicyError, VacuousConstraint
+from .errors import DataError, PolicyError, VacuousConstraint
 from .policy import Policy, SimilarityConstraint
 from .sim import DEFAULT_MAX_PAIRS, EXACTNESS_RANK, SimilarityResult, resolve
 
@@ -128,6 +128,9 @@ def label_kind(policy: Policy, values: Sequence[Optional[str]]) -> str:
         numbers = [float(value) for value in present]
     except ValueError:
         return "categorical"
+    numbers = [number for number in numbers if number == number and abs(number) != float("inf")]
+    if not numbers:
+        return "categorical"
     return "numeric" if len(set(numbers)) > NUMERIC_BUCKETS * 2 else "categorical"
 
 
@@ -145,7 +148,18 @@ def label_classes(policy: Policy, data: Dataset) -> Tuple[Optional[List[str]], s
     present = [value for value in values if value is not None]
     kind = label_kind(policy, values)
     if kind == "numeric":
-        numeric = [float(value) for value in present]
+        try:
+            parsed = [float(value) for value in present]
+        except ValueError as exc:
+            raise DataError(
+                f"label column '{policy.dataset.label_column}' was declared numeric but holds "
+                "a value that is not a number",
+                remedy="Set dataset.label_kind to categorical, or clean the column.",
+                details={"column": policy.dataset.label_column, "reason": str(exc)},
+            ) from exc
+        numeric = [
+            number for number in parsed if number == number and abs(number) != float("inf")
+        ]
         if not numeric:
             return None, "none"
         import numpy as np
@@ -156,8 +170,12 @@ def label_classes(policy: Policy, data: Dataset) -> Tuple[Optional[List[str]], s
         for value in values:
             if value is None:
                 out.append(MISSING_CLASS)
-            else:
-                out.append(f"q{int(np.searchsorted(edges, float(value), side='right'))}")
+                continue
+            number = float(value)
+            if number != number or abs(number) == float("inf"):
+                out.append(MISSING_CLASS)
+                continue
+            out.append(f"q{int(np.searchsorted(edges, number, side='right'))}")
         return out, f"numeric, {NUMERIC_BUCKETS} quantile buckets"
     distinct = len({value for value in present})
     if distinct > MAX_STRATIFY_CLASSES:
@@ -175,7 +193,8 @@ def _constraint_id(constraint: SimilarityConstraint) -> str:
 
     Omitting params and backend let two constraints on the same key and threshold
     share a key, so a clean one silently overwrote a violated one and both reported
-    satisfied.
+    satisfied. The threshold is written at full precision for the same reason: 0.5 and
+    0.5000004 both render as "0.5" under %g.
     """
     suffix = ""
     if constraint.backend:
@@ -183,7 +202,7 @@ def _constraint_id(constraint: SimilarityConstraint) -> str:
     if constraint.params:
         settings = ",".join(f"{name}={value}" for name, value in sorted(constraint.params))
         suffix += f"[{settings}]"
-    return f"{constraint.key}:{constraint.metric}@{constraint.threshold:g}{suffix}"
+    return f"{constraint.key}:{constraint.metric}@{constraint.threshold!r}{suffix}"
 
 
 def build(

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .digest import canonical
 from .errors import PolicyError
 
 POLICY_VERSION = 1
@@ -241,7 +242,9 @@ class Scheme:
             return [f"fold{i}" for i in range(self.folds)]
         if self.kind == "leave-unit-out":
             return []
-        return sorted(self.fractions)
+        from .assign import fold_order
+
+        return sorted(self.fractions, key=fold_order)
 
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {"kind": self.kind}
@@ -404,6 +407,7 @@ class Policy:
             )
         seed = _as_int(raw.get("seed", 7), "policy.seed")
         _check_temporal_fits_scheme(constraints, scheme)
+        _check_constraints_are_distinct(constraints)
         return Policy(
             version=version,
             dataset=dataset,
@@ -457,6 +461,19 @@ def _parse_structured(text: str, path: Path) -> Dict[str, Any]:
     if loaded is None:
         raise PolicyError(f"policy file {path} is empty")
     return loaded
+
+
+def _check_constraints_are_distinct(constraints: List[Constraint]) -> None:
+    seen: Dict[str, int] = {}
+    for index, constraint in enumerate(constraints):
+        key = canonical(constraint.to_dict())
+        if key in seen:
+            raise PolicyError(
+                f"constraints[{index}] repeats constraints[{seen[key]}] exactly",
+                remedy="Remove the duplicate. Two identical constraints measure the same thing.",
+                details={"first": seen[key], "duplicate": index},
+            )
+        seen[key] = index
 
 
 def _check_temporal_fits_scheme(constraints: List[Constraint], scheme: Scheme) -> None:

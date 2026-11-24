@@ -82,9 +82,10 @@ def _check_similarity(
         "backend": result.backend if result else "unknown",
     }
     unparsable = len(result.unparsable) if result else 0
+    absent = (len(result.missing) - unparsable) if result else 0
     if count:
         status = VIOLATED
-    elif unparsable:
+    elif unparsable or absent:
         status = SATISFIED_UNPROVEN
     elif result is not None and result.exactness == EXACT:
         status = SATISFIED
@@ -107,7 +108,13 @@ def _check_similarity(
             "to nothing; the search was not exhaustive over the declared key and the result is "
             "evidence rather than proof"
         )
-    if status == SATISFIED_UNPROVEN and not unparsable:
+    if absent and not count:
+        notes.append(
+            f"{absent} entities have no value for this key, so no pair involving them was "
+            "compared; those rows sit in a fold unconstrained and the result is evidence "
+            "rather than proof"
+        )
+    if status == SATISFIED_UNPROVEN and not unparsable and not absent:
         notes.append(
             "no crossing pair was found, but this backend does not guarantee it found every pair, "
             "so the result is evidence rather than proof"
@@ -197,16 +204,18 @@ def _crossing(
     crossing_sims = sims[positions]
     worst = float(crossing_sims.max())
     identity = {index: data.ids[index] for index in range(len(data))}
+
+    def oriented(position: int) -> Tuple[int, int]:
+        left_index, right_index = int(rows[position]), int(cols[position])
+        if identity[right_index] < identity[left_index]:
+            return right_index, left_index
+        return left_index, right_index
+
     ranked = sorted(
         positions.tolist(),
-        key=lambda p: (-float(sims[p]), identity[int(rows[p])], identity[int(cols[p])]),
+        key=lambda p: (-float(sims[p]), identity[oriented(p)[0]], identity[oriented(p)[1]]),
     )[:MAX_EXAMPLES]
-    examples = []
-    for p in ranked:
-        left_index, right_index = int(rows[p]), int(cols[p])
-        if identity[right_index] < identity[left_index]:
-            left_index, right_index = right_index, left_index
-        examples.append((left_index, right_index, float(sims[p])))
+    examples = [(*oriented(p), float(sims[p])) for p in ranked]
     names = list(assignment.folds)
     by_pair: Dict[str, int] = {}
     pair_left, pair_right = left[positions], right[positions]

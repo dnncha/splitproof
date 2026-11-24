@@ -129,3 +129,17 @@ def test_the_certificate_is_byte_identical_across_runs(policy_dict, tmp_path: Pa
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
     assert digest_of() == digest_of()
+
+
+def test_minhash_refuses_before_enumerating_a_single_huge_bucket():
+    """Round 2 moved the guard after the inner loop, re-opening the OOM it closed.
+
+    One colliding bucket of m members inserts m(m-1)/2 tuples before any check, and
+    MinHash is the default above 20000 rows, so a single bucket could exhaust memory
+    before the budget was consulted.
+    """
+    values = ["ACDEFGHIKLMNPQRSTVWY" * 10] * 4000
+    with pytest.raises(TooManyPairs) as error:
+        MinHashJaccard().pairs_above(values, "protein", 0.9, max_pairs=1000)
+    assert error.value.details["stage"] == "candidate_generation"
+    assert error.value.details["candidate_pairs"] > 1000
