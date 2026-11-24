@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-from pathlib import Path
 
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
