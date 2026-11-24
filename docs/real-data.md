@@ -3,8 +3,9 @@
 Measured on 24 November 2026 with splitproof between commits f39d777 and fe73796, RDKit
 2026.09, on a Colab CPU runtime. The commits in that range change speed and fold packing, not
 any audit number below. Every split splitproof built from these policies re-verified against
-its own certificate, except two not run to save time: HIV under Tanimoto (seven minutes per
-verify) and human proteins under MMseqs2 identity (twenty). No command printed a traceback.
+its own certificate, including the human-protein split under real MMseqs2 identity (twenty
+minutes to recompute), except HIV under Tanimoto, whose seven-minute verify was stopped to save
+time. No command printed a traceback.
 
 `scripts/realdata.py` reproduces every number here. The datasets are MoleculeNet CSVs from DeepChem's public bucket, read as published. Each row
 got an id where the file had none. The "random" column is a seeded 80/20 split, the split most
