@@ -2,7 +2,7 @@
 
 Inner loop: `.venv/bin/python -m pytest -q` (~20 s)
 Gate: `scripts/gate.sh` (~35 s on the Mac)
-Scheduled: none yet (see Holes)
+Scheduled: weekly mutation testing (GitHub Actions `mutation`, Mondays 04:17 UTC)
 
 ## Signals by tier
 
@@ -18,11 +18,13 @@ Scheduled: none yet (see Holes)
 | inner | Constraint coverage and vacuity | `pytest -q tests/test_coverage.py` | inner, gate | 1 s | honest |
 | inner | CLI output contract | `pytest -q tests/test_cli_contract.py` | inner, gate | 1 s | honest |
 | inner | MCP message fuzz | `pytest -q tests/test_mcp.py -k kills` | inner, gate | 2 s | honest, Hypothesis, 150 batches |
+| inner | Allocation within unit granularity | `pytest -q tests/test_assign_properties.py` | inner, gate | 3 s | honest, Hypothesis, 120 instances |
 | inner | Data loader fuzz | `pytest -q tests/test_dataset_properties.py` | inner, gate | 3 s | honest, Hypothesis, 250 examples per property |
 | inner | Soundness: temporal, determinism, crossing matrix, policy params | `pytest -q tests/test_soundness.py` | inner, gate | 2 s | honest |
 | inner | Certificate tamper resistance | `pytest -q tests/test_core.py -k verify` | inner, gate | 2 s | honest, 8 tamper vectors |
 | inner | Cross-process determinism | `pytest -q tests/test_determinism.py` | inner, gate | 6 s | honest, runs subprocesses under three PYTHONHASHSEED values |
 | gate | End-to-end split, verify, audit | `scripts/gate.sh` | gate, CI | 3 s | honest |
+| nightly | Mutation testing over `evaluate.py`, `assign.py`, `cert.py` | GitHub Actions `mutation` (`mutmut run`) | scheduled: GitHub Actions cron, weekly, survivors commented on one open issue | hours | honest, mutmut 3.8.1; a run that cannot collect stats or force a failure fails the job |
 | gate | Python matrix (3.10, 3.12, 3.13) | GitHub Actions `test` | gate (push, PR) | 1 min | honest |
 | gate | MMseqs2 identity path, really executed | GitHub Actions `identity` | gate (push, PR) | 2 min | honest |
 | gate | RDKit tanimoto and scaffold, really executed | GitHub Actions `chem` | gate (push, PR) | 2 min | honest |
@@ -74,17 +76,15 @@ Scheduled: none yet (see Holes)
    pocket metric overclaims against PLINDER and PINDER, which showed sequence identity
    alone leaks badly on 3D data. Either add a structural backend or scope the claim
    explicitly (~2 days).
-6. **No scheduled tier.** Nothing runs mutation testing or a long scale sweep. Add a
-   weekly GitHub Actions schedule over `evaluate.py`, `assign.py` and `cert.py`, with a
-   red run opening an issue (~45 min).
-7. **MMseqs2 defaults can miss real homology.** `cov_mode 0` at `-c 0.8` cannot see a
+6. **MMseqs2 defaults can miss real homology.** `cov_mode 0` at `-c 0.8` cannot see a
    100%-identical domain inside a multi-domain protein, and the default e-value hides
    identical short peptides. The parameters are in the policy and the digest now, but the
    defaults deserve a documented discussion and probably a second recommended profile
    (~half a day).
-8. **Allocation is greedy, not optimal.** A dataset whose unit sizes pack badly can still
-   miss the requested fractions by more than unit granularity requires, and nothing
-   measures the gap to an optimal packing (~1 h).
+7. **Allocation is greedy, not optimal.** `tests/test_assign_properties.py` now proves every
+   fold lands within one largest unit of its target and no fold is starved when there are
+   enough units, over random unit sizes and fractions. What is still unmeasured is the gap
+   to an optimal packing; a brute-force comparison on small instances would show it (~1 h).
 
 ## Escape log
 

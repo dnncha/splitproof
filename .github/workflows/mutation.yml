@@ -18,9 +18,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e '.[dev]' mutmut==3.3.1
+      - run: pip install -e '.[dev]'
       - name: mutate evaluate, assign and cert
-        run: mutmut run --max-children 4 || true
+        run: mutmut run --max-children 4
       - name: survivors
         id: survivors
         run: |
