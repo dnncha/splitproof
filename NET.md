@@ -93,12 +93,14 @@ Scheduled: weekly mutation testing (GitHub Actions `mutation`, Mondays 04:17 UTC
    or more units; an exact small-instance solver or a bounded 3-for-1 move would close it
    (~2 h). Measure with the brute-force comparison before changing it.
 
-8. **813 mutants survive in `evaluate.py`, `assign.py` and `cert.py`** (issue #1, first weekly
-   run on f90fe03's parent). Most mutate error-message text, but `assign`, `check_audit_folds`,
-   `_fill_empty_folds`, `_check_disjoint`, `_check_temporal` and `cert.verify` each carry
-   dozens of logic survivors. Triage by function, write an oracle or exact-value test per
-   function as `tests/test_crossing_oracle.py` did for `_crossing_classes`, and mark
-   message-only mutants with `# pragma: no mutate` (~1 day).
+8. **Mutation survivors are triaged for the soundness core, not yet everywhere.** The first
+   full run (issue #1) left 813. Oracles or exact tests now cover `_crossing`,
+   `_crossing_classes`, `_check_disjoint`, `_check_temporal`, `_check_similarity`,
+   `first_difference`, `cert.verify` (a whole-certificate edit sweep), `check_audit_folds`,
+   `_spearman`, `_distribution` and `_nn_baseline`; that triage found four defects. Still open:
+   `cert.read` and the `GiantUnit` and `PolicyError` message and details text, which is most of
+   the remainder, plus `diagnostics()` wiring. Read the next weekly run's artifact (survivor
+   diffs) and mark message-only mutants with `# pragma: no mutate` (~half a day).
 
 ## Escape log
 
