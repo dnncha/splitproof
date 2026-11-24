@@ -63,10 +63,12 @@ class Dataset:
         if policy.dataset.label_column:
             relevant.append(policy.dataset.label_column)
         ordered = sorted(dict.fromkeys(relevant))
+        absent: List[Optional[str]] = [None] * len(self.ids)
+        selected = [self.columns.get(c, absent) for c in ordered]
         rows: List[List[Optional[str]]] = []
         for i, entity_id in enumerate(self.ids):
             row: List[Optional[str]] = [entity_id]
-            row.extend(self.columns.get(c, [None] * len(self.ids))[i] for c in ordered)
+            row.extend(values[i] for values in selected)
             rows.append(row)
         rows.sort(key=lambda row: str(row[0]))
         return digest({"columns": ordered, "rows": rows})

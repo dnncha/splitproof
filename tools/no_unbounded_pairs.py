@@ -14,6 +14,12 @@ Two patterns are refused anywhere under src/:
                             came to sort every crossing pair in Python. Pair
                             arrays are iterated in chunks by PairSet only.
 
+  .get(key, [x] * n)
+                            builds the default on every call, so inside a loop
+                            over rows it allocates n items per row: digest_for
+                            was quadratic this way, minutes at 470k rows. Build
+                            the default once, outside the loop.
+
   PairSet.from_triples / from_blocks outside sim/__init__.py
                             bypasses PairCollector, which is the only thing that
                             charges the pair budget. A backend that builds a
@@ -29,6 +35,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 DENSE = re.compile(r"\.(toarray|todense)\s*\(")
+EAGER_SIZED_DEFAULT = re.compile(r"\.get\([^()]*,\s*\[[^\]]*\]\s*\*")
 WHOLE_ARRAY_TO_PYTHON = re.compile(r"\.tolist\s*\(")
 DIRECT_PAIRSET = re.compile(r"PairSet\.(from_triples|from_blocks)\s*\(")
 
@@ -52,6 +59,15 @@ def scan(root: Path) -> List[Tuple[Path, int, str, str]]:
                         "dense-materialisation",
                         "builds a dense block that grows with the product of two input sizes; "
                         "work on the sparse nonzeros instead",
+                    )
+                )
+            if EAGER_SIZED_DEFAULT.search(line):
+                findings.append(
+                    (
+                        relative,
+                        number,
+                        "eager-sized-default",
+                        "builds an n-sized default on every call; build it once outside the loop",
                     )
                 )
             if WHOLE_ARRAY_TO_PYTHON.search(line) and relative != COLLECTOR_HOME:

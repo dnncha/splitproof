@@ -64,6 +64,18 @@ def test_checker_catches_a_whole_pair_array_turned_into_python(tmp_path: Path):
     assert "evaluate.py:2" in result.stderr
 
 
+def test_checker_catches_an_n_sized_default_built_per_row(tmp_path: Path):
+    planted = tmp_path / "src" / "splitproof"
+    planted.mkdir(parents=True)
+    (planted / "dataset.py").write_text(
+        "def f(cols, ids, c, i):\n    return cols.get(c, [None] * len(ids))[i]\n", encoding="utf-8"
+    )
+    result = _run_checker(tmp_path)
+    assert result.returncode == 1
+    assert "eager-sized-default" in result.stderr
+    assert "dataset.py:2" in result.stderr
+
+
 def test_checker_honours_an_explicit_justification(tmp_path: Path):
     planted = tmp_path / "src" / "splitproof" / "sim"
     planted.mkdir(parents=True)

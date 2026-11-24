@@ -24,6 +24,8 @@ jobs:
           for round in 1 2 3 4 5; do
             HYPOTHESIS_PROFILE=explore python -m pytest -q -p no:cacheprovider
           done
+      - name: growth stays below quadratic for split, audit and verify
+        run: python scripts/scale_sweep.py 25000
       - name: mutate evaluate, assign and cert
         run: mutmut run --max-children 4
       - name: survivors
