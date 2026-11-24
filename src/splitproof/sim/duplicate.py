@@ -14,8 +14,18 @@ from . import (
 )
 
 
-def _normalise(value: str) -> str:
-    return "".join(value.split()).upper()
+SEQUENCE_KINDS = {"protein", "dna", "rna"}
+
+
+def _normalise(value: str, kind: str) -> str:
+    """Strip whitespace, and fold case only where case carries no meaning.
+
+    In SMILES case is semantic: lowercase means aromatic, so upper-casing made
+    benzene and cyclohexane the same molecule. Sequence alphabets are
+    case-insensitive, so folding there is correct.
+    """
+    text = "".join(value.split())
+    return text.upper() if kind in SEQUENCE_KINDS else text
 
 
 @register("exact_duplicate")
@@ -45,13 +55,14 @@ class ExactDuplicate(SimilarityBackend):
             if value is None:
                 missing.append(i)
                 continue
-            buckets.setdefault(_normalise(value), []).append(i)
+            buckets.setdefault(_normalise(value, kind), []).append(i)
         groups: List[Optional[str]] = [None] * len(values)
         for label, members in buckets.items():
             for member in members:
                 groups[member] = label
+        folded = "and case-folded " if kind in SEQUENCE_KINDS else ""
         notes = [
-            "compares whitespace-stripped, upper-cased values for exact equality; equal values "
+            f"compares whitespace-stripped {folded}values for exact equality; equal values "
             "form an equivalence class, so no pairwise edge list is ever built"
         ]
         if missing:
@@ -81,12 +92,12 @@ class ExactDuplicate(SimilarityBackend):
         for i in sorted(set(int(t) for t in targets), key=key):
             value = values[i]
             if value is not None:
-                lookup.setdefault(_normalise(value), i)
+                lookup.setdefault(_normalise(value, kind), i)
         out: Dict[int, Optional[Neighbour]] = {}
         for raw in queries:
             query = int(raw)
             value = values[query]
-            match = lookup.get(_normalise(value)) if value is not None else None
+            match = lookup.get(_normalise(value, kind)) if value is not None else None
             if match is not None and match != query:
                 out[query] = Neighbour(index=match, similarity=1.0)
             else:

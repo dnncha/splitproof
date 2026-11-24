@@ -201,6 +201,85 @@ class MorganTanimoto(_ChemBackend):
         return out
 
 
+@register("canonical_smiles")
+class CanonicalSmiles(_ChemBackend):
+    name = "canonical_smiles"
+    metric = "canonical_smiles"
+    exactness = EXACT
+    emits = "classes"
+
+    def _canonical(self, values: Sequence[Optional[str]]):
+        Chem, _generators = _rdkit()
+        out: List[Optional[str]] = []
+        missing: List[int] = []
+        unparsable: List[int] = []
+        for i, value in enumerate(values):
+            molecule = Chem.MolFromSmiles(value) if value else None
+            if molecule is None:
+                out.append(None)
+                missing.append(i)
+                if value:
+                    unparsable.append(i)
+                continue
+            fragments = Chem.GetMolFrags(molecule, asMols=True, sanitizeFrags=False)
+            if len(fragments) > 1:
+                molecule = max(fragments, key=lambda fragment: fragment.GetNumHeavyAtoms())
+            out.append(Chem.MolToSmiles(molecule, canonical=True))
+        return out, missing, unparsable
+
+    def pairs_above(
+        self,
+        values: Sequence[Optional[str]],
+        kind: str,
+        threshold: float,
+        *,
+        max_pairs: int = DEFAULT_MAX_PAIRS,
+    ) -> SimilarityResult:
+        canonical, missing, unparsable = self._canonical(values)
+        groups: List[Optional[str]] = list(canonical)
+        distinct = len({value for value in canonical if value})
+        notes = [
+            "compares RDKit canonical SMILES of the largest covalent fragment, so a salt and "
+            "its parent and two spellings of one molecule are the same compound, while "
+            "enantiomers are not"
+        ]
+        if unparsable:
+            notes.append(f"{len(unparsable)} entities hold SMILES that RDKit could not parse")
+        return SimilarityResult(
+            backend=self.name,
+            backend_version=self.version(),
+            metric=self.metric,
+            exactness=EXACT,
+            threshold=threshold,
+            groups=groups,
+            missing=missing,
+            unparsable=unparsable,
+            notes=notes,
+            params={"distinct_compounds": distinct},
+        )
+
+    def nearest(
+        self,
+        values: Sequence[Optional[str]],
+        kind: str,
+        queries: Sequence[int],
+        targets: Sequence[int],
+        order: Optional[Sequence[str]] = None,
+    ) -> Dict[int, Optional[Neighbour]]:
+        canonical, _missing, _unparsable = self._canonical(values)
+        key = (lambda index: str(order[index])) if order is not None else (lambda index: index)
+        lookup: Dict[str, int] = {}
+        for i in sorted(set(int(t) for t in targets), key=key):
+            if canonical[i]:
+                lookup.setdefault(canonical[i], i)
+        out: Dict[int, Optional[Neighbour]] = {}
+        for raw in queries:
+            query = int(raw)
+            match = lookup.get(canonical[query]) if canonical[query] else None
+            out[query] = Neighbour(index=match, similarity=1.0) if match is not None and match != query else None
+        return out
+
+
 @register("ring_systems")
 class RingSystems(_ChemBackend):
     name = "ring_systems"

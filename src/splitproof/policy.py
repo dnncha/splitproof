@@ -14,12 +14,13 @@ SIMILARITY_METRICS = {
     "kmer_jaccard": {"sequence"},
     "tanimoto": {"molecule"},
     "ring_systems": {"molecule"},
+    "canonical_smiles": {"molecule"},
     "exact_duplicate": {"sequence", "molecule", "text"},
 }
 
 KEY_KINDS = {"protein", "dna", "rna", "molecule", "text"}
 
-EQUIVALENCE_METRICS = {"exact_duplicate", "ring_systems"}
+EQUIVALENCE_METRICS = {"exact_duplicate", "ring_systems", "canonical_smiles"}
 
 SPAN_ACTIONS = {"test", "drop", "error"}
 

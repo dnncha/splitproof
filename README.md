@@ -327,9 +327,17 @@ file telling an agent when to reach for it and how to read the result honestly.
 | `kmer_jaccard` | MinHash LSH (large n) | core install | lower bound |
 | `tanimoto` | RDKit Morgan fingerprints | `splitproof[chem]` | exact |
 | `ring_systems` | canonical ring-system set over RDKit | `splitproof[chem]` | exact |
+| `canonical_smiles` | RDKit canonical SMILES, desalted | `splitproof[chem]` | exact |
 | `exact_duplicate` | normalised equality | core install | exact |
 
 Reads CSV, TSV, FASTA, and Parquet with `splitproof[parquet]`.
+
+`exact_duplicate` folds case only for sequence keys, where the alphabet is
+case-insensitive. It does not fold case for molecules, because in SMILES case is
+semantic: upper-casing turns benzene into cyclohexane. For "is this the same
+compound", use `canonical_smiles`, which compares RDKit canonical SMILES of the
+largest covalent fragment, so a salt and its parent and two spellings of one molecule
+are one compound while enantiomers are not.
 
 The `ring_systems` backend groups molecules by their canonical set of ring systems,
 computed as SMILES fragments of the parent molecule so nothing is edited and nothing

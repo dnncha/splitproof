@@ -16,7 +16,7 @@ CHECKER = ROOT / "tools" / "no_unbounded_pairs.py"
 
 DENSE_VALUES = ["ACDEFGHIKLMNPQRSTVWY" * 8] * 60
 DENSE_MOLECULES = ["c1ccc(C2=NCCNc3ccccc32)cc1"] * 60
-MOLECULE_METRICS = {"tanimoto", "ring_systems"}
+MOLECULE_METRICS = {"tanimoto", "ring_systems", "canonical_smiles"}
 
 
 def _run_checker(root: Path) -> subprocess.CompletedProcess:

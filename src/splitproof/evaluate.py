@@ -457,8 +457,10 @@ def _nn_baseline(
         "metric": "accuracy",
         "value": round(correct / compared, 6),
         "note": (
-            "a nearest-neighbour copy of the reference fold scores this much; a model that does "
-            "not clearly beat it has learned nothing beyond similarity"
+            "what a nearest-neighbour copy of the reference fold scores. Similarity reasoning "
+            "is a legitimate model, so this is neither a floor nor a ceiling: a model that "
+            "does not clearly beat it has not shown it learned anything beyond similarity, "
+            "and beating it is not on its own evidence that the split is sound"
         ),
     }
 

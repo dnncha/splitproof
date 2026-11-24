@@ -374,6 +374,8 @@ def resolve(
         backend = construct(table["exact_duplicate"], settings)
     elif metric == "tanimoto":
         backend = construct(table["tanimoto"], settings)
+    elif metric == "canonical_smiles":
+        backend = construct(table["canonical_smiles"], settings)
     elif metric == "ring_systems":
         backend = construct(table["ring_systems"], settings)
     else:

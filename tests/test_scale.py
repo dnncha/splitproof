@@ -83,3 +83,19 @@ def test_exact_and_minhash_agree_on_the_strongest_pair():
     exact = ExactJaccard().pairs_above(values, "protein", 0.3)
     approximate = MinHashJaccard().pairs_above(values, "protein", 0.3)
     assert exact.pairs.max_similarity == pytest.approx(approximate.pairs.max_similarity, abs=1e-6)
+
+
+def test_exact_duplicate_does_not_fold_case_for_molecules():
+    """The guard for an escape found by auditing a real benchmark.
+
+    Upper-casing a SMILES string destroys aromaticity, so benzene and cyclohexane
+    were reported as the same molecule. That produced false duplicate findings on
+    MoleculeNet BACE: six, where canonical SMILES finds none.
+    """
+    result = ExactDuplicate().pairs_above(["c1ccccc1", "C1CCCCC1"], "molecule", 1.0)
+    assert result.groups[0] != result.groups[1]
+
+
+def test_exact_duplicate_still_folds_case_for_sequences():
+    result = ExactDuplicate().pairs_above(["ACDEFGHIK", "acdefghik"], "protein", 1.0)
+    assert result.groups[0] == result.groups[1]

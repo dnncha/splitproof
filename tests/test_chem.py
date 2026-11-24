@@ -324,3 +324,26 @@ def test_a_salt_and_its_parent_land_in_the_same_fold(tmp_path: Path):
     )
     assert outcome.reports[0].status == VIOLATED
     assert outcome.reports[0].measured["cross_fold_pairs_at_or_above_threshold"] == 2
+
+
+def test_canonical_smiles_groups_spellings_and_salts_but_not_enantiomers():
+    from splitproof.sim.chem import CanonicalSmiles
+
+    values = [
+        "CC(=O)Oc1ccccc1C(=O)O",
+        "O=C(C)Oc1ccccc1C(=O)O",
+        "CC(=O)Oc1ccccc1C(=O)O.Cc1ccc(S(=O)(=O)O)cc1",
+        "C[C@H](N)C(=O)O",
+        "C[C@@H](N)C(=O)O",
+    ]
+    result = CanonicalSmiles().pairs_above(values, "molecule", 1.0)
+    assert result.groups[0] == result.groups[1] == result.groups[2]
+    assert result.groups[3] != result.groups[4]
+
+
+def test_canonical_smiles_reports_unparsable_input():
+    from splitproof.sim.chem import CanonicalSmiles
+
+    result = CanonicalSmiles().pairs_above(["CCO", "@@@nope@@@", None], "molecule", 1.0)
+    assert result.unparsable == [1]
+    assert result.missing == [1, 2]
