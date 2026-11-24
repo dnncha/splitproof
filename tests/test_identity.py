@@ -108,3 +108,13 @@ def test_mmseqs_charges_the_pair_budget(identity_policy):
     values = [row["sequence"] for row in rows]
     with pytest.raises(TooManyPairs):
         MMseqs2Identity().pairs_above(values, "protein", 0.3, max_pairs=5)
+
+
+def test_every_number_reaches_mmseqs_at_full_precision(tmp_path):
+    from splitproof.sim.mmseqs import MMseqs2Identity
+
+    backend = MMseqs2Identity()
+    command = backend.command(tmp_path / "q", tmp_path / "t", tmp_path / "o", tmp_path / "tmp", 0.1234567891)
+    assert command[command.index("--min-seq-id") + 1] == "0.1234567891"
+    for flag, value in (("-c", backend.coverage), ("-e", backend.evalue), ("-s", backend.sensitivity)):
+        assert float(command[command.index(flag) + 1]) == float(value)
