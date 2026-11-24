@@ -1,6 +1,6 @@
 # Working on splitproof
 
-Inner loop: `.venv/bin/python -m pytest -q`
+Inner loop: `.venv/bin/python -m pytest -q -m "not binary"`
 Gate, before any commit: `./scripts/gate.sh`
 
 [NET.md](NET.md) holds the feedback net: every signal and its trigger, the risk surfaces

@@ -87,3 +87,11 @@ def policy_dict(data_file: Path) -> Dict[str, object]:
         ],
         "seed": 7,
     }
+
+
+def pytest_collection_modifyitems(config, items):
+    binary = pytest.mark.binary
+    for item in items:
+        if item.module.__name__ == "test_identity" or "[mmseqs2]" in item.nodeid:
+            if "full_precision" not in item.nodeid:
+                item.add_marker(binary)

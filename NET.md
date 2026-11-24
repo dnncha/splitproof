@@ -1,7 +1,7 @@
 # Feedback net
 
-Inner loop: `.venv/bin/python -m pytest -q` (~20 s)
-Gate: `scripts/gate.sh` (~35 s on the Mac)
+Inner loop: `.venv/bin/python -m pytest -q -m "not binary"` (~7 s; skips tests that run MMseqs2)
+Gate: `scripts/gate.sh` (~45 s on the Mac with MMseqs2 installed, ~52 s on a fresh fleet worker including the venv bootstrap)
 Scheduled: weekly mutation testing (GitHub Actions `mutation`, Mondays 04:17 UTC)
 
 ## Signals by tier
