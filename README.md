@@ -237,16 +237,16 @@ The same data, split by `splitproof`:
 $ splitproof split proteins.yaml
 240 entities in 6 independent units; folds: test=42, train=198.
 Constraint status: proven.
-Worst held-out similarity to the reference fold: 0.00232 (31 of 42 held-out items have
+Worst held-out similarity to the reference fold: 0.00232 (38 of 42 held-out items have
   any neighbour).
-Similarity baseline: spearman=0.117907 over 31 held-out items.
+Similarity baseline: spearman=-0.243314 over 38 held-out items.
 ```
 
-The baseline collapses from 0.88 to 0.12, and the worst held-out similarity falls from
+The baseline collapses from 0.88 to -0.24, and the worst held-out similarity falls from
 0.87 to 0.002. That gap is how much of the original score was leakage.
 
-Note the baseline's denominator: 31 of the 42 held-out items, because only those share
-any k-mer with the training fold at all. The other 11 have no nearest neighbour to copy,
+Note the baseline's denominator: 38 of the 42 held-out items, because only those share
+any k-mer with the training fold at all. The other 4 have no nearest neighbour to copy,
 which is the point of the split. `with_a_neighbour` in the JSON always reports that
 coverage, so the baseline is never quoted without it.
 

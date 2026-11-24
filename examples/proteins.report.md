@@ -5,7 +5,7 @@
 - entities: 240
 - data digest: `sha256:ee6f7f5294593cba55ebed4fcd8a33de0ace7ea96e04d8001628072889fb205b`
 - policy digest: `sha256:7f1dbae30095eae077973849f0e3f8377034eb4a3214507d68076b4f1cbc8202`
-- assignment digest: `sha256:bf38f87a2c2d6d40544adff5d096212c4f07bcad82efd6ebd4d6f25f0e4478d7`
+- assignment digest: `sha256:1dc845d979b01cec8ab83bdf646557f3db1df98a352cc50fa98e00a1e5ad71bb`
 - splitproof 0.1.0, seed 7
 
 ## Folds
@@ -56,7 +56,7 @@ Reference fold: `train`
 - held-out items compared: 42
 - nearest reference similarity: {'min': 0.00232, 'p50': 0.00232, 'p90': 0.00232, 'p99': 0.00232, 'max': 0.00232, 'mean': 0.00232}
 - at or above the declared threshold: 0
-- nearest-neighbour baseline: spearman=0.117907 over 31 items
+- nearest-neighbour baseline: spearman=-0.243314 over 38 items
 - what a nearest-neighbour copy of the reference fold scores. Similarity reasoning is a legitimate model, so this is neither a floor nor a ceiling: a model that does not clearly beat it has not shown it learned anything beyond similarity, and beating it is not on its own evidence that the split is sound
 
 ## What this does and does not prove

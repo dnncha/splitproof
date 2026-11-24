@@ -4,7 +4,7 @@ import bisect
 import hashlib
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .dataset import Dataset
 from .errors import DataError
@@ -125,8 +125,8 @@ def assign(policy: Policy, graph: UnitGraph, *, tolerance: float = 0.1) -> Assig
         placement[position] = choice
         _place(unit, choice, fold_of, counts, unit_counts, label_counts)
 
-    _fill_empty_folds(fold_names, ordered, placement, fold_of, counts, unit_counts)
-    _improve(fold_names, ordered, placement, fold_of, counts, unit_counts, targets)
+    _fill_empty_folds(fold_names, ordered, placement, fold_of, counts, unit_counts, label_counts)
+    _improve(fold_names, ordered, placement, fold_of, counts, unit_counts, label_counts, targets, shares)
 
     empty = [name for name in fold_names if counts[name] == 0]
     if empty:
@@ -156,6 +156,7 @@ def _fill_empty_folds(
     fold_of: Dict[int, str],
     counts: Dict[str, int],
     unit_counts: Dict[str, int],
+    label_counts: Dict[str, Dict[str, int]],
 ) -> None:
     """Move units into folds the greedy pass left empty.
 
@@ -175,7 +176,7 @@ def _fill_empty_folds(
         if not donors:
             return
         choice = min(donors, key=lambda position: (ordered[position].size, placement[position]))
-        _relocate(choice, name, ordered, placement, fold_of, counts, unit_counts)
+        _relocate(choice, name, ordered, placement, fold_of, counts, unit_counts, label_counts)
 
 
 def _relocate(
@@ -186,6 +187,7 @@ def _relocate(
     fold_of: Dict[int, str],
     counts: Dict[str, int],
     unit_counts: Dict[str, int],
+    label_counts: Dict[str, Dict[str, int]],
 ) -> None:
     unit = ordered[position]
     source = placement[position]
@@ -195,6 +197,9 @@ def _relocate(
     unit_counts[source] -= 1
     counts[destination] += unit.size
     unit_counts[destination] += 1
+    for label, amount in unit.label_counts.items():
+        label_counts[source][label] -= amount
+        label_counts[destination][label] = label_counts[destination].get(label, 0) + amount
     placement[position] = destination
 
 
@@ -202,27 +207,36 @@ def _size_cost(counts: Dict[str, int], targets: Dict[str, int]) -> float:
     return round(sum(((counts[name] - targets[name]) / max(targets[name], 1)) ** 2 for name in targets), 9)
 
 
-def _bundles(fold: str, ordered: Sequence[Unit], placement: Dict[int, str]) -> List[Tuple[int, Tuple[int, ...]]]:
-    """Every distinct way to take nothing, one unit or two units out of a fold, by size.
+def _label_cost(
+    label_counts: Dict[str, Dict[str, int]], targets: Dict[str, int], shares: Dict[str, float]
+) -> float:
+    return round(
+        sum(
+            abs(label_counts[name].get(label, 0) / max(targets[name], 1) - share)
+            for name in targets
+            for label, share in shares.items()
+        ),
+        9,
+    )
 
-    Units of one size in one fold are interchangeable for the size objective, so at
-    most two representatives of each size are kept, which bounds the bundles by the
-    number of distinct sizes rather than the number of units.
+
+Bundle = Tuple[int, Tuple[int, ...]]
+
+
+def _bundles(pool: Dict[int, List[int]]) -> List[Bundle]:
+    """Every distinct way to take nothing, one unit or two units of given sizes out of a fold.
+
+    Units of one size are interchangeable for fold sizes, so bundles are built over
+    sizes rather than units, which bounds them by the number of distinct sizes.
     """
-    by_size: Dict[int, List[int]] = {}
-    for position in range(len(ordered)):
-        if placement[position] == fold:
-            kept = by_size.setdefault(ordered[position].size, [])
-            if len(kept) < 2:
-                kept.append(position)
-    sizes = sorted(by_size)
-    out: List[Tuple[int, Tuple[int, ...]]] = [(0, ())]
+    sizes = sorted(size for size, members in pool.items() if members)
+    out: List[Bundle] = [(0, ())]
     for index, size in enumerate(sizes):
-        out.append((size, (by_size[size][0],)))
-        if len(by_size[size]) == 2:
-            out.append((2 * size, tuple(by_size[size])))
+        out.append((size, (size,)))
+        if len(pool[size]) >= 2:
+            out.append((2 * size, (size, size)))
         for other in sizes[index + 1 :]:
-            out.append((size + other, (by_size[size][0], by_size[other][0])))
+            out.append((size + other, (size, other)))
     return sorted(out)
 
 
@@ -233,61 +247,201 @@ def _improve(
     fold_of: Dict[int, str],
     counts: Dict[str, int],
     unit_counts: Dict[str, int],
+    label_counts: Dict[str, Dict[str, int]],
     targets: Dict[str, int],
+    shares: Dict[str, float],
 ) -> None:
-    """Exchange small bundles of floating units while that strictly improves fold sizes.
+    """Repair what the greedy pass misses: first fold sizes, then label balance.
 
     The greedy pass places the largest units first and never revisits them, so it
     can miss a packing that exists: sizes 13, 13, 13, 8, 3, 2, 2, 2, 1 at 7:2:7 put
-    13 in a fold whose target is 7. Each step trades a bundle of up to two units in
-    one fold for a bundle of up to two in another, either side possibly empty, and
-    takes the exchange that lowers the cost most. For each bundle the ideal partner
-    size has a closed form, so only its two nearest neighbours are tried. Every
-    accepted step lowers the cost, so the loop ends, and no step empties a fold.
+    13 in a fold whose target is 7. It also balances labels only when two folds tie
+    exactly on size, which almost never happens, so 20 singletons of two labels came
+    out 7:3 in one fold. Sizes are repaired first and labels only by swapping units of
+    equal size, so requested fractions are never traded for label balance.
     """
+    _improve_sizes(fold_names, ordered, placement, fold_of, counts, unit_counts, label_counts, targets)
+    if shares:
+        _improve_labels(fold_names, ordered, placement, fold_of, counts, unit_counts, label_counts, targets, shares)
+
+
+def _improve_sizes(
+    fold_names: Sequence[str],
+    ordered: Sequence[Unit],
+    placement: Dict[int, str],
+    fold_of: Dict[int, str],
+    counts: Dict[str, int],
+    unit_counts: Dict[str, int],
+    label_counts: Dict[str, Dict[str, int]],
+    targets: Dict[str, int],
+) -> None:
+    """Exchange bundles of up to two units between folds while fold-size error strictly falls.
+
+    Either side of an exchange may be empty. For each bundle the ideal partner size
+    has a closed form, so only the two nearest sizes are tried, and the chosen
+    exchange is repeated while it keeps helping. Every accepted step lowers the
+    cost, so the loop ends, and no step empties a fold.
+    """
+    pools: Dict[str, Dict[int, List[int]]] = {name: {} for name in fold_names}
+    for position in sorted(range(len(ordered)), reverse=True):
+        pools[placement[position]].setdefault(ordered[position].size, []).append(position)
+
+    def cost_after(first: str, second: str, out_sizes: Tuple[int, ...], in_sizes: Tuple[int, ...]) -> Optional[float]:
+        if unit_counts[first] - len(out_sizes) + len(in_sizes) < 1:
+            return None
+        if unit_counts[second] - len(in_sizes) + len(out_sizes) < 1:
+            return None
+        for sizes, fold in ((out_sizes, first), (in_sizes, second)):
+            for size in set(sizes):
+                if len(pools[fold].get(size, [])) < sizes.count(size):
+                    return None
+        trial = dict(counts)
+        trial[first] += sum(in_sizes) - sum(out_sizes)
+        trial[second] += sum(out_sizes) - sum(in_sizes)
+        return _size_cost(trial, targets)
+
+    def apply(first: str, second: str, out_sizes: Tuple[int, ...], in_sizes: Tuple[int, ...]) -> None:
+        moves = [(pools[first][size].pop(), second) for size in out_sizes]
+        moves += [(pools[second][size].pop(), first) for size in in_sizes]
+        for position, destination in moves:
+            _relocate(position, destination, ordered, placement, fold_of, counts, unit_counts, label_counts)
+            pools[destination].setdefault(ordered[position].size, []).append(position)
+
     while True:
-        bundles = {name: _bundles(name, ordered, placement) for name in fold_names}
+        bundles = {name: _bundles(pools[name]) for name in fold_names}
         sizes = {name: [size for size, _ in bundles[name]] for name in fold_names}
-        best: Tuple[float, Tuple[int, ...], Tuple[int, ...], str, str] = (
-            _size_cost(counts, targets), (), (), "", ""
-        )
+        best = _size_cost(counts, targets)
+        choice: Optional[Tuple[str, str, Tuple[int, ...], Tuple[int, ...]]] = None
         for first in fold_names:
             for second in fold_names:
                 if first >= second:
                     continue
                 weight_first = 1.0 / max(targets[first], 1) ** 2
                 weight_second = 1.0 / max(targets[second], 1) ** 2
-                surplus_first = counts[first] - targets[first]
-                surplus_second = counts[second] - targets[second]
-                ideal_shift = (weight_first * surplus_first - weight_second * surplus_second) / (
-                    weight_first + weight_second
-                )
-                for out_size, out_positions in bundles[first]:
-                    wanted = out_size - ideal_shift
-                    spot = bisect.bisect_left(sizes[second], wanted)
-                    for candidate in (spot - 1, spot):
-                        if not 0 <= candidate < len(bundles[second]):
+                ideal_shift = (
+                    weight_first * (counts[first] - targets[first])
+                    - weight_second * (counts[second] - targets[second])
+                ) / (weight_first + weight_second)
+                for out_size, out_sizes in bundles[first]:
+                    spot = bisect.bisect_left(sizes[second], out_size - ideal_shift)
+                    for nearest in (spot - 1, spot):
+                        if not 0 <= nearest < len(bundles[second]):
                             continue
-                        in_size, in_positions = bundles[second][candidate]
-                        if not out_positions and not in_positions:
+                        in_sizes = bundles[second][nearest][1]
+                        if not out_sizes and not in_sizes:
                             continue
-                        if unit_counts[first] - len(out_positions) + len(in_positions) < 1:
-                            continue
-                        if unit_counts[second] - len(in_positions) + len(out_positions) < 1:
-                            continue
-                        trial = dict(counts)
-                        trial[first] += in_size - out_size
-                        trial[second] += out_size - in_size
-                        cost = _size_cost(trial, targets)
-                        if cost < best[0]:
-                            best = (cost, out_positions, in_positions, first, second)
-        _, out_positions, in_positions, first, second = best
-        if not out_positions and not in_positions:
+                        cost = cost_after(first, second, out_sizes, in_sizes)
+                        if cost is not None and cost < best:
+                            best, choice = cost, (first, second, out_sizes, in_sizes)
+        if choice is None:
             return
-        for position in out_positions:
-            _relocate(position, second, ordered, placement, fold_of, counts, unit_counts)
-        for position in in_positions:
-            _relocate(position, first, ordered, placement, fold_of, counts, unit_counts)
+        while True:
+            apply(*choice)
+            following = cost_after(*choice)
+            if following is None or following >= best:
+                break
+            best = following
+
+
+def _improve_labels(
+    fold_names: Sequence[str],
+    ordered: Sequence[Unit],
+    placement: Dict[int, str],
+    fold_of: Dict[int, str],
+    counts: Dict[str, int],
+    unit_counts: Dict[str, int],
+    label_counts: Dict[str, Dict[str, int]],
+    targets: Dict[str, int],
+    shares: Dict[str, float],
+) -> None:
+    """Swap equal-size units between folds while label drift strictly falls.
+
+    A swap of equal sizes leaves every fold size unchanged, so this cannot undo the
+    size repair. For each pair of folds and each size, the unit whose labels lean
+    furthest toward the first fold's surplus is swapped with the one leaning furthest
+    the other way, found in one scan, and the swap is kept only if the exact drift
+    falls. Every accepted swap lowers the drift, so the loop ends.
+    """
+    LabelShape = Tuple[Tuple[str, int], ...]
+    pools: Dict[str, Dict[int, Dict[LabelShape, List[int]]]] = {name: {} for name in fold_names}
+
+    def shape_of(position: int) -> LabelShape:
+        return tuple(sorted(ordered[position].label_counts.items()))
+
+    def store(position: int) -> None:
+        unit = ordered[position]
+        pools[placement[position]].setdefault(unit.size, {}).setdefault(shape_of(position), []).append(position)
+
+    for position in sorted(range(len(ordered)), reverse=True):
+        if ordered[position].label_counts:
+            store(position)
+
+    def surplus(name: str) -> Dict[str, float]:
+        target = max(targets[name], 1)
+        return {label: label_counts[name].get(label, 0) / target - share for label, share in shares.items()}
+
+    def lean(shape: LabelShape, direction: Dict[str, float]) -> float:
+        return sum(amount * direction.get(label, 0.0) for label, amount in shape)
+
+    def swap(out_position: int, in_position: int) -> None:
+        source, destination = placement[out_position], placement[in_position]
+        for position in (out_position, in_position):
+            members = pools[placement[position]][ordered[position].size][shape_of(position)]
+            if members[-1] == position:
+                members.pop()
+            else:
+                members.remove(position)
+        _relocate(out_position, destination, ordered, placement, fold_of, counts, unit_counts, label_counts)
+        _relocate(in_position, source, ordered, placement, fold_of, counts, unit_counts, label_counts)
+        store(out_position)
+        store(in_position)
+
+    def candidate(first: str, second: str, size: int) -> Optional[Tuple[int, int]]:
+        over_first, over_second = surplus(first), surplus(second)
+        direction = {label: over_first[label] - over_second[label] for label in shares}
+        leaving = [shape for shape, members in pools[first].get(size, {}).items() if members]
+        arriving = [shape for shape, members in pools[second].get(size, {}).items() if members]
+        if not leaving or not arriving:
+            return None
+        out_shape = max(leaving, key=lambda shape: (lean(shape, direction), shape))
+        in_shape = min(arriving, key=lambda shape: (lean(shape, direction), shape))
+        if out_shape == in_shape:
+            return None
+        return pools[first][size][out_shape][-1], pools[second][size][in_shape][-1]
+
+    def drift_after(pair: Tuple[int, int]) -> float:
+        out_position, in_position = pair
+        swap(out_position, in_position)
+        cost = _label_cost(label_counts, targets, shares)
+        swap(out_position, in_position)
+        return cost
+
+    while True:
+        best = _label_cost(label_counts, targets, shares)
+        choice: Optional[Tuple[str, str, int, Tuple[int, int]]] = None
+        for first in fold_names:
+            for second in fold_names:
+                if first >= second:
+                    continue
+                for size in sorted(set(pools[first]) & set(pools[second])):
+                    pair = candidate(first, second, size)
+                    if pair is None:
+                        continue
+                    cost = drift_after(pair)
+                    if cost < best:
+                        best, choice = cost, (first, second, size, pair)
+        if choice is None:
+            return
+        first, second, size, pair = choice
+        while pair is not None:
+            swap(*pair)
+            pair = candidate(first, second, size)
+            if pair is None:
+                break
+            following = drift_after(pair)
+            if following >= best:
+                break
+            best = following
 
 
 def _place(

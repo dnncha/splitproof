@@ -124,3 +124,76 @@ def test_no_single_move_or_swap_improves_the_allocation(tmp_path_factory, instan
                     swapped[source] += other - size
                     swapped[destination] += size - other
                     assert _cost(swapped, targets) >= current, ("swap", size, other, counts)
+
+
+def _units_csv(directory, sizes, labels=None):
+    path = directory / "units.csv"
+    with path.open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["id", "grp", "label"])
+        for unit, size in enumerate(sizes):
+            for member in range(size):
+                label = labels[unit] if labels else "x"
+                writer.writerow([f"u{unit:03d}m{member}", f"g{unit}", label])
+    return path
+
+
+def _grouped_policy(path, fractions, seed=1, label=False):
+    dataset = {"path": str(path), "id": "id", "groups": ["grp"]}
+    if label:
+        dataset["label"] = "label"
+    return Policy.from_dict(
+        {
+            "splitproof": 1,
+            "dataset": dataset,
+            "scheme": {"kind": "holdout", "fractions": fractions},
+            "constraints": [{"kind": "disjoint", "key": "grp"}],
+            "seed": seed,
+        }
+    )
+
+
+def test_a_unit_exactly_at_fold_capacity_fits_and_one_more_row_does_not(tmp_path_factory):
+    from splitproof.errors import GiantUnit
+
+    work = tmp_path_factory.mktemp("giant")
+    fits = _units_csv(work, [11] + [1] * 9)
+    outcome = api.make_split(_grouped_policy(fits, {"train": 0.5, "test": 0.5}), skip_neighbours=True, tolerance=0.1)
+    assert sorted(stat.count for stat in outcome.assignment.stats) == [9, 11]
+    work = tmp_path_factory.mktemp("giant2")
+    too_big = _units_csv(work, [12] + [1] * 8)
+    try:
+        api.make_split(_grouped_policy(too_big, {"train": 0.5, "test": 0.5}), skip_neighbours=True, tolerance=0.1)
+    except GiantUnit as error:
+        assert error.details["largest_unit"] == 12
+        assert error.details["fold_targets"] == {"test": 10, "train": 10}
+        assert error.details["largest_unit_fraction"] == 0.6
+    else:
+        raise AssertionError("a 12-row unit against a 10-row target at tolerance 0.1 should not fit")
+
+
+def test_the_default_tolerance_is_ten_per_cent(tmp_path_factory):
+    import inspect
+
+    from splitproof import assign as assign_module
+
+    assert inspect.signature(assign_module.assign).parameters["tolerance"].default == 0.1
+
+
+def test_labels_are_balanced_across_folds_when_sizes_allow_it(tmp_path_factory):
+    work = tmp_path_factory.mktemp("strat")
+    labels = ["a"] * 10 + ["b"] * 10
+    path = _units_csv(work, [1] * 20, labels)
+    outcome = api.make_split(_grouped_policy(path, {"train": 0.5, "test": 0.5}, label=True), skip_neighbours=True)
+    for stat in outcome.assignment.stats:
+        assert stat.label_counts == {"a": 5, "b": 5}, stat
+
+
+def test_the_seed_decides_among_equally_good_splits(tmp_path_factory):
+    work = tmp_path_factory.mktemp("seed")
+    path = _units_csv(work, [1] * 30)
+    folds = set()
+    for seed in range(4):
+        outcome = api.make_split(_grouped_policy(path, {"train": 0.5, "test": 0.5}, seed=seed), skip_neighbours=True)
+        folds.add(tuple(sorted(outcome.assignment.fold_of.items())))
+    assert len(folds) == 4

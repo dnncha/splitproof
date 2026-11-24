@@ -1,6 +1,6 @@
 {
   "assignment": {
-    "digest": "sha256:bf38f87a2c2d6d40544adff5d096212c4f07bcad82efd6ebd4d6f25f0e4478d7",
+    "digest": "sha256:1dc845d979b01cec8ab83bdf646557f3db1df98a352cc50fa98e00a1e5ad71bb",
     "dropped": 0,
     "folds": [
       "test",
@@ -11,8 +11,8 @@
         "count": 42,
         "drift": -0.125,
         "labels": {
-          "q2": 7,
-          "q3": 35
+          "q0": 27,
+          "q1": 15
         },
         "name": "test",
         "target": 48,
@@ -22,10 +22,10 @@
         "count": 198,
         "drift": 0.03125,
         "labels": {
-          "q0": 60,
-          "q1": 60,
-          "q2": 53,
-          "q3": 25
+          "q0": 33,
+          "q1": 45,
+          "q2": 60,
+          "q3": 60
         },
         "name": "train",
         "target": 192,
@@ -66,7 +66,7 @@
       "status": "satisfied"
     }
   ],
-  "created": "2026-11-24T03:24:02+00:00",
+  "created": "2026-11-24T10:50:07+00:00",
   "dataset": {
     "digest": "sha256:ee6f7f5294593cba55ebed4fcd8a33de0ace7ea96e04d8001628072889fb205b",
     "entities": 240,
@@ -79,10 +79,10 @@
         "backend": "exact_jaccard",
         "metric": "kmer_jaccard",
         "nearest_neighbour_baseline": {
-          "compared": 31,
+          "compared": 38,
           "metric": "spearman",
           "note": "what a nearest-neighbour copy of the reference fold scores. Similarity reasoning is a legitimate model, so this is neither a floor nor a ceiling: a model that does not clearly beat it has not shown it learned anything beyond similarity, and beating it is not on its own evidence that the split is sound",
-          "value": 0.117907
+          "value": -0.243314
         },
         "nearest_reference_similarity": {
           "max": 0.00232,
@@ -94,7 +94,7 @@
         },
         "queries": 42,
         "threshold": 0.4,
-        "with_a_neighbour": 31
+        "with_a_neighbour": 38
       }
     },
     "reference_fold": "train"
