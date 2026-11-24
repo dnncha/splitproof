@@ -20,6 +20,7 @@ Scheduled: weekly mutation testing (GitHub Actions `mutation`, Mondays 04:17 UTC
 | inner | MCP message fuzz | `pytest -q tests/test_mcp.py -k kills` | inner, gate | 2 s | honest, Hypothesis, 150 batches |
 | inner | Allocation within unit granularity | `pytest -q tests/test_assign_properties.py` | inner, gate | 3 s | honest, Hypothesis, 120 instances |
 | inner | Crossing counts against brute-force enumeration | `pytest -q tests/test_crossing_oracle.py` | inner, gate | 2 s | honest, Hypothesis, 300 cases each for class and pair crossings and for the disjoint and temporal checks, measured fields and status included; written because 37, 31 and 29 mutants of those functions survived the first mutation run |
+| inner | Certificate comparison oracle | `pytest -q tests/test_cert_properties.py` | inner, gate | 1 s | honest, Hypothesis; `first_difference` reports a difference exactly when an independent type-aware comparison says the values differ |
 | inner | Data loader fuzz | `pytest -q tests/test_dataset_properties.py` | inner, gate | 3 s | honest, Hypothesis, 250 examples per property |
 | inner | Soundness: temporal, determinism, crossing matrix, policy params | `pytest -q tests/test_soundness.py` | inner, gate | 2 s | honest |
 | inner | Certificate tamper resistance | `pytest -q tests/test_core.py -k verify` | inner, gate | 2 s | honest, 8 tamper vectors |
