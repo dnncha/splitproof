@@ -173,7 +173,7 @@ $ cutsite audit proteins.yaml --split-column fold_random
 Constraint status: VIOLATED.
 - no pair above kmer_jaccard 0.4 on 'sequence' may cross folds: VIOLATED.
 - no value of 'donor_id' may appear in more than one fold: VIOLATED.
-Nearest-neighbour baseline on sequence:kmer_jaccard@0.4: spearman=0.881475 over 74
+Nearest-neighbour baseline on sequence:kmer_jaccard@0.4: spearman=0.881424 over 74
   held-out items. Beat this or the model learned nothing.
 Held-out items' nearest reference similarity: median 0.630189, p99 0.792531, max 0.87013.
 ```
@@ -189,12 +189,17 @@ The same data, split by `cutsite`:
 $ cutsite split proteins.yaml
 240 entities in 6 independent units; folds: test=36, train=204.
 Constraint status: proven.
-Nearest-neighbour baseline: spearman=-0.027364 over 36 held-out items.
+Nearest-neighbour baseline: spearman=0.020119 over 23 held-out items.
 Held-out items' nearest reference similarity: median 0.00232, p99 0.004651, max 0.004651.
 ```
 
-The baseline collapses from 0.88 to −0.03. That gap is how much of the original score
-was leakage.
+The baseline collapses from 0.88 to 0.02. That gap is how much of the original score was
+leakage.
+
+Note the baseline's denominator: 23 of the 36 held-out items, because only those share
+any k-mer with the training fold at all. The other 13 have no nearest neighbour to copy,
+which is the point of the split. `with_a_neighbour` in the JSON always reports that
+coverage, so the baseline is never quoted without it.
 
 Note the fold sizes: 36/204, not the requested 48/192. Six donor groups across 240 rows
 means only six independent units exist, so the achievable fractions are coarse.

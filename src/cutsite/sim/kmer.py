@@ -12,7 +12,8 @@ from . import (
     PairSet,
     SimilarityBackend,
     SimilarityResult,
-    guard_pair_budget,
+    PairCollector,
+    register,
 )
 
 DEFAULT_K = {"protein": 5, "dna": 12, "rna": 12, "text": 4, "molecule": 4}
@@ -70,6 +71,7 @@ def _chunk_rows(nnz_per_row: np.ndarray, budget: int = 4_000_000) -> int:
     return max(1, min(2048, int(budget / max(mean_nnz, 1.0))))
 
 
+@register("exact_jaccard")
 class ExactJaccard(SimilarityBackend):
     name = "exact_jaccard"
     metric = "kmer_jaccard"
@@ -93,8 +95,7 @@ class ExactJaccard(SimilarityBackend):
     ) -> SimilarityResult:
         k = kmer_size(kind)
         matrix, sizes, missing, vocab_size = _matrix(values, k)
-        blocks: List[Tuple[np.ndarray, np.ndarray, np.ndarray]] = []
-        found = 0
+        collector = PairCollector(self.name, threshold, max_pairs)
         n = matrix.shape[0]
         transposed = matrix.T.tocsr()
         step = _chunk_rows(np.diff(matrix.indptr))
@@ -116,10 +117,8 @@ class ExactJaccard(SimilarityBackend):
             hit = sim >= threshold
             if not hit.any():
                 continue
-            found += int(hit.sum())
-            guard_pair_budget(found, max_pairs, self.name, threshold)
-            blocks.append((rows[hit], cols[hit], sim[hit].astype(np.float32)))
-        pairs = PairSet.from_blocks(blocks)
+            collector.add_block(rows[hit], cols[hit], sim[hit])
+        pairs = collector.finish()
         notes: List[str] = []
         if missing:
             notes.append(f"{len(missing)} entities have no value for this key and are treated as unrelated")
@@ -154,23 +153,32 @@ class ExactJaccard(SimilarityBackend):
         step = _chunk_rows(np.diff(matrix.indptr))
         for start in range(0, query_index.size, step):
             rows = query_index[start : start + step]
-            block = (matrix[rows] @ target_matrix).toarray()
-            union = sizes[rows][:, None] + target_sizes[None, :] - block
+            block = (matrix[rows] @ target_matrix).tocoo()
+            if block.nnz == 0:
+                continue
+            local_rows = block.row.astype(np.int64)
+            local_cols = block.col.astype(np.int64)
+            global_rows = rows[local_rows]
+            global_cols = target_index[local_cols]
+            inter = block.data
+            union = sizes[global_rows] + target_sizes[local_cols] - inter
             with np.errstate(divide="ignore", invalid="ignore"):
-                sim = np.where(union > 0, block / union, 0.0)
-            for local, global_row in enumerate(rows):
-                row = sim[local]
-                mask = target_index != global_row
-                if not mask.any():
-                    continue
-                masked = np.where(mask, row, -1.0)
-                best = int(np.argmax(masked))
-                if masked[best] < 0:
-                    continue
-                out[int(global_row)] = Neighbour(index=int(target_index[best]), similarity=float(masked[best]))
+                sim = np.where(union > 0, inter / union, 0.0)
+            keep = global_rows != global_cols
+            if not keep.any():
+                continue
+            global_rows, global_cols, sim = global_rows[keep], global_cols[keep], sim[keep]
+            order = np.lexsort((-sim, global_rows))
+            global_rows, global_cols, sim = global_rows[order], global_cols[order], sim[order]
+            _unique, first = np.unique(global_rows, return_index=True)
+            for position in first:
+                out[int(global_rows[position])] = Neighbour(
+                    index=int(global_cols[position]), similarity=float(sim[position])
+                )
         return out
 
 
+@register("minhash")
 class MinHashJaccard(SimilarityBackend):
     name = "minhash"
     metric = "kmer_jaccard"
@@ -253,8 +261,7 @@ class MinHashJaccard(SimilarityBackend):
                 for a_pos in range(len(members)):
                     for b_pos in range(a_pos + 1, len(members)):
                         candidates.add((members[a_pos], members[b_pos]))
-            guard_pair_budget(len(candidates), max_pairs, self.name, threshold)
-        triples: List[Tuple[int, int, float]] = []
+        collector = PairCollector(self.name, threshold, max_pairs)
         for i, j in sorted(candidates):
             left, right = token_sets[i], token_sets[j]
             if left is None or right is None:
@@ -264,8 +271,8 @@ class MinHashJaccard(SimilarityBackend):
                 continue
             sim = len(left & right) / union
             if sim >= threshold:
-                triples.append((i, j, float(sim)))
-        pairs = PairSet.from_triples(triples)
+                collector.add(i, j, sim)
+        pairs = collector.finish()
         notes = [
             "MinHash LSH finds most but not provably all pairs above the threshold, so the measured "
             "maximum is a lower bound; reported similarities themselves are exact",

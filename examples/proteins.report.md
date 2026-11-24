@@ -51,9 +51,9 @@ Reference fold: `train`
 
 - metric: kmer_jaccard via exact_jaccard
 - held-out items compared: 36
-- nearest reference similarity: {'min': 0.0, 'p50': 0.00232, 'p90': 0.004651, 'p99': 0.004651, 'max': 0.004651, 'mean': 0.001871}
+- nearest reference similarity: {'min': 0.00232, 'p50': 0.00232, 'p90': 0.004651, 'p99': 0.004651, 'max': 0.004651, 'mean': 0.002928}
 - at or above the declared threshold: 0
-- nearest-neighbour baseline: spearman=-0.027364 over 36 items
+- nearest-neighbour baseline: spearman=0.020119 over 23 items
 - a nearest-neighbour copy of the reference fold scores this much; a model that does not clearly beat it has learned nothing beyond similarity
 
 ## What this does and does not prove

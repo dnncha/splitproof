@@ -19,10 +19,5 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: pip install -e '.[dev]'
-      - run: pytest -q
-      - name: end to end
-        working-directory: examples
-        run: |
-          cutsite split proteins.yaml --out s.csv --cert c.json
-          cutsite verify c.json --split s.csv
-          ! cutsite audit proteins.yaml --split-column fold_random
+      - name: gate
+        run: PYTHON=$(command -v python) ./scripts/gate.sh

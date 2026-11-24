@@ -82,6 +82,55 @@ class PairSet:
         return int(self.rows.nbytes + self.cols.nbytes + self.sims.nbytes)
 
 
+class PairCollector:
+    """The only sanctioned way to accumulate similarity pairs.
+
+    Every add checks the budget, so a backend cannot build an unbounded pair list
+    by forgetting a guard: there is no other route to a SimilarityResult's pairs.
+    """
+
+    __slots__ = ("_backend", "_threshold", "_max_pairs", "_count", "_blocks", "_triples")
+
+    def __init__(self, backend: str, threshold: float, max_pairs: int = DEFAULT_MAX_PAIRS):
+        self._backend = backend
+        self._threshold = threshold
+        self._max_pairs = max_pairs
+        self._count = 0
+        self._blocks: List[Tuple[np.ndarray, np.ndarray, np.ndarray]] = []
+        self._triples: List[Tuple[int, int, float]] = []
+
+    def __len__(self) -> int:
+        return self._count
+
+    def _charge(self, amount: int) -> None:
+        self._count += amount
+        guard_pair_budget(self._count, self._max_pairs, self._backend, self._threshold)
+
+    def add_block(self, rows: np.ndarray, cols: np.ndarray, sims: np.ndarray) -> None:
+        if rows.size == 0:
+            return
+        self._charge(int(rows.size))
+        self._blocks.append(
+            (rows.astype(np.int64, copy=False), cols.astype(np.int64, copy=False), sims.astype(np.float32, copy=False))
+        )
+
+    def add(self, left: int, right: int, similarity: float) -> None:
+        self._charge(1)
+        self._triples.append((int(left), int(right), float(similarity)))
+
+    def finish(self) -> PairSet:
+        if self._triples:
+            self._blocks.append(
+                (
+                    np.fromiter((t[0] for t in self._triples), dtype=np.int64, count=len(self._triples)),
+                    np.fromiter((t[1] for t in self._triples), dtype=np.int64, count=len(self._triples)),
+                    np.fromiter((t[2] for t in self._triples), dtype=np.float32, count=len(self._triples)),
+                )
+            )
+            self._triples = []
+        return PairSet.from_blocks(self._blocks)
+
+
 def guard_pair_budget(count: int, max_pairs: int, backend: str, threshold: float) -> None:
     if count <= max_pairs:
         return
@@ -156,17 +205,25 @@ class SimilarityBackend:
         raise NotImplementedError
 
 
-def resolve(metric: str, kind: str, count: int, *, requested: Optional[str] = None, exact_max_n: int = 20000):
-    from . import chem, duplicate, kmer, mmseqs
+BACKENDS: Dict[str, type] = {}
 
-    table = {
-        "exact_jaccard": kmer.ExactJaccard,
-        "minhash": kmer.MinHashJaccard,
-        "mmseqs2": mmseqs.MMseqs2Identity,
-        "exact_duplicate": duplicate.ExactDuplicate,
-        "tanimoto": chem.MorganTanimoto,
-        "scaffold": chem.MurckoScaffold,
-    }
+
+def register(name: str):
+    def decorate(cls):
+        BACKENDS[name] = cls
+        return cls
+
+    return decorate
+
+
+def backend_table() -> Dict[str, type]:
+    from . import chem, duplicate, kmer, mmseqs  # noqa: F401
+
+    return dict(BACKENDS)
+
+
+def resolve(metric: str, kind: str, count: int, *, requested: Optional[str] = None, exact_max_n: int = 20000):
+    table = backend_table()
     if requested:
         if requested not in table:
             raise BackendUnavailable(
@@ -176,15 +233,15 @@ def resolve(metric: str, kind: str, count: int, *, requested: Optional[str] = No
             )
         backend = table[requested]()
     elif metric == "identity":
-        backend = mmseqs.MMseqs2Identity()
+        backend = table["mmseqs2"]()
     elif metric == "kmer_jaccard":
-        backend = kmer.ExactJaccard() if count <= exact_max_n else kmer.MinHashJaccard()
+        backend = table["exact_jaccard"]() if count <= exact_max_n else table["minhash"]()
     elif metric == "exact_duplicate":
-        backend = duplicate.ExactDuplicate()
+        backend = table["exact_duplicate"]()
     elif metric == "tanimoto":
-        backend = chem.MorganTanimoto()
+        backend = table["tanimoto"]()
     elif metric == "scaffold":
-        backend = chem.MurckoScaffold()
+        backend = table["scaffold"]()
     else:
         raise BackendUnavailable(
             f"no backend implements metric {metric!r}",

@@ -13,11 +13,19 @@ from . import (
     PairSet,
     SimilarityBackend,
     SimilarityResult,
-    guard_pair_budget,
+    PairCollector,
+    register,
 )
 
 COVERAGE_DEFAULT = 0.8
 SENSITIVITY_DEFAULT = 7.5
+
+
+def _collect(backend: str, threshold: float, max_pairs: int, triples) -> PairSet:
+    collector = PairCollector(backend, threshold, max_pairs)
+    for left, right, identity in triples:
+        collector.add(left, right, identity)
+    return collector.finish()
 
 
 def parse_search_tsv(text: str, id_to_index: Dict[str, int]) -> List[Tuple[int, int, float]]:
@@ -47,6 +55,7 @@ def parse_search_tsv(text: str, id_to_index: Dict[str, int]) -> List[Tuple[int, 
     return [(a, b, value) for (a, b), value in sorted(pairs.items())]
 
 
+@register("mmseqs2")
 class MMseqs2Identity(SimilarityBackend):
     name = "mmseqs2"
     metric = "identity"
@@ -143,14 +152,13 @@ class MMseqs2Identity(SimilarityBackend):
                 )
                 id_to_index = {f"s{i}": i for i in present}
                 triples = parse_search_tsv(out.read_text(encoding="utf-8"), id_to_index)
-                guard_pair_budget(len(triples), max_pairs, self.name, threshold)
         return SimilarityResult(
             backend=self.name,
             backend_version=self.version(),
             metric=self.metric,
             exactness=HEURISTIC,
             threshold=threshold,
-            pairs=PairSet.from_triples(triples),
+            pairs=_collect(self.name, threshold, max_pairs, triples),
             missing=missing,
             notes=notes,
             params={"coverage": self.coverage, "sensitivity": self.sensitivity, "cov_mode": 0},

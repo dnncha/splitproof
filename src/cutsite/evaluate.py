@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import numpy as np
+
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -62,23 +64,15 @@ def _check_similarity(
     identifier = _constraint_id(constraint)
     result = graph.similarity.get(identifier)
     fold_of = assignment.fold_of
-    crossing: List[Tuple[int, int, float]] = []
-    if result is not None:
-        for left, right, sim in result.pairs:
-            left_fold, right_fold = fold_of.get(left, DROPPED), fold_of.get(right, DROPPED)
-            if left_fold == DROPPED or right_fold == DROPPED:
-                continue
-            if left_fold != right_fold:
-                crossing.append((left, right, sim))
-    worst = max((sim for _l, _r, sim in crossing), default=None)
+    count, worst, worst_examples = _crossing(result, data, assignment)
     measured = {
         "pairs_at_or_above_threshold": len(result.pairs) if result else 0,
-        "cross_fold_pairs_at_or_above_threshold": len(crossing),
+        "cross_fold_pairs_at_or_above_threshold": count,
         "max_cross_fold_similarity": round(worst, 6) if worst is not None else None,
         "exactness": result.exactness if result else "unknown",
         "backend": result.backend if result else "unknown",
     }
-    if crossing:
+    if count:
         status = VIOLATED
     elif result is not None and result.exactness == EXACT:
         status = SATISFIED
@@ -92,7 +86,7 @@ def _check_similarity(
             "a_fold": fold_of.get(left),
             "b_fold": fold_of.get(right),
         }
-        for left, right, sim in sorted(crossing, key=lambda item: -item[2])[:MAX_EXAMPLES]
+        for left, right, sim in worst_examples
     ]
     notes = list(result.notes) if result else ["similarity was not computed"]
     if status == SATISFIED_UNPROVEN:
@@ -109,6 +103,37 @@ def _check_similarity(
         examples=examples,
         notes=notes,
     )
+
+
+def _crossing(
+    result: Optional[Any],
+    data: Dataset,
+    assignment: Assignment,
+) -> Tuple[int, Optional[float], List[Tuple[int, int, float]]]:
+    """Count cross-fold pairs without ever materialising them.
+
+    The pair graph is quadratic in the worst case, so this works on the numpy
+    arrays behind the PairSet and keeps only the worst MAX_EXAMPLES.
+    """
+    if result is None or len(result.pairs) == 0:
+        return 0, None, []
+    fold_numbers = {name: number for number, name in enumerate(assignment.folds)}
+    lookup = np.full(len(data), -1, dtype=np.int64)
+    for index, fold in assignment.fold_of.items():
+        if fold != DROPPED and fold in fold_numbers:
+            lookup[index] = fold_numbers[fold]
+    rows, cols, sims = result.pairs.rows, result.pairs.cols, result.pairs.sims
+    left, right = lookup[rows], lookup[cols]
+    crossing = (left >= 0) & (right >= 0) & (left != right)
+    count = int(crossing.sum())
+    if count == 0:
+        return 0, None, []
+    positions = np.flatnonzero(crossing)
+    crossing_sims = sims[positions]
+    worst = float(crossing_sims.max())
+    top = positions[np.argsort(-crossing_sims, kind="stable")[:MAX_EXAMPLES]]
+    examples = [(int(rows[p]), int(cols[p]), float(sims[p])) for p in top]
+    return count, worst, examples
 
 
 def _check_disjoint(constraint: DisjointConstraint, data: Dataset, assignment: Assignment) -> ConstraintReport:

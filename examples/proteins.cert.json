@@ -292,7 +292,7 @@
       "status": "satisfied"
     }
   ],
-  "created": "2026-11-24T01:28:19+00:00",
+  "created": "2026-11-24T01:44:22+00:00",
   "cutsite": {
     "schema": 1,
     "version": "0.1.0"
@@ -310,22 +310,22 @@
         "backend": "exact_jaccard",
         "metric": "kmer_jaccard",
         "nearest_neighbour_baseline": {
-          "compared": 36,
+          "compared": 23,
           "metric": "spearman",
           "note": "a nearest-neighbour copy of the reference fold scores this much; a model that does not clearly beat it has learned nothing beyond similarity",
-          "value": -0.027364
+          "value": 0.020119
         },
         "nearest_reference_similarity": {
           "max": 0.004651,
-          "mean": 0.001871,
-          "min": 0.0,
+          "mean": 0.002928,
+          "min": 0.00232,
           "p50": 0.00232,
           "p90": 0.004651,
           "p99": 0.004651
         },
         "queries": 36,
         "threshold": 0.4,
-        "with_a_neighbour": 36
+        "with_a_neighbour": 23
       }
     },
     "reference_fold": "train"

@@ -9,7 +9,8 @@ from . import (
     PairSet,
     SimilarityBackend,
     SimilarityResult,
-    guard_pair_budget,
+    PairCollector,
+    register,
 )
 
 
@@ -17,6 +18,7 @@ def _normalise(value: str) -> str:
     return "".join(value.split()).upper()
 
 
+@register("exact_duplicate")
 class ExactDuplicate(SimilarityBackend):
     name = "exact_duplicate"
     metric = "exact_duplicate"
@@ -43,13 +45,12 @@ class ExactDuplicate(SimilarityBackend):
                 missing.append(i)
                 continue
             buckets.setdefault(_normalise(value), []).append(i)
-        triples: List[Tuple[int, int, float]] = []
+        collector = PairCollector(self.name, threshold, max_pairs)
         for members in buckets.values():
             for a_pos in range(len(members)):
                 for b_pos in range(a_pos + 1, len(members)):
-                    triples.append((members[a_pos], members[b_pos], 1.0))
-            guard_pair_budget(len(triples), max_pairs, self.name, threshold)
-        pairs = PairSet.from_triples(triples)
+                    collector.add(members[a_pos], members[b_pos], 1.0)
+        pairs = collector.finish()
         notes = ["compares whitespace-stripped, upper-cased values for exact equality"]
         if missing:
             notes.append(f"{len(missing)} entities have no value for this key and are treated as unrelated")
