@@ -8,6 +8,12 @@ Two patterns are refused anywhere under src/:
                             on realistic data and is OOM-killed rather than
                             failing cleanly.
 
+  .tolist() outside sim/__init__.py
+                            turns a whole pair array into Python objects, about
+                            fifty times its numpy size, which is how evaluate.py
+                            came to sort every crossing pair in Python. Pair
+                            arrays are iterated in chunks by PairSet only.
+
   PairSet.from_triples / from_blocks outside sim/__init__.py
                             bypasses PairCollector, which is the only thing that
                             charges the pair budget. A backend that builds a
@@ -23,6 +29,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 DENSE = re.compile(r"\.(toarray|todense)\s*\(")
+WHOLE_ARRAY_TO_PYTHON = re.compile(r"\.tolist\s*\(")
 DIRECT_PAIRSET = re.compile(r"PairSet\.(from_triples|from_blocks)\s*\(")
 
 COLLECTOR_HOME = Path("src/splitproof/sim/__init__.py")
@@ -45,6 +52,16 @@ def scan(root: Path) -> List[Tuple[Path, int, str, str]]:
                         "dense-materialisation",
                         "builds a dense block that grows with the product of two input sizes; "
                         "work on the sparse nonzeros instead",
+                    )
+                )
+            if WHOLE_ARRAY_TO_PYTHON.search(line) and relative != COLLECTOR_HOME:
+                findings.append(
+                    (
+                        relative,
+                        number,
+                        "array-to-python",
+                        "converts a whole array to Python objects; keep pair work in numpy "
+                        "(np.partition, np.lexsort, np.unique) or iterate the PairSet in chunks",
                     )
                 )
             if DIRECT_PAIRSET.search(line) and relative != COLLECTOR_HOME:

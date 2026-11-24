@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import datetime as _dt
 import json
 import re
 import sys
@@ -9,8 +8,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import __version__, api, cert as cert_module, dataset as dataset_module, report as report_module
-from .errors import SplitproofError, InfeasibleSplit
+from .errors import DataError, FileProblem, InfeasibleSplit, SplitproofError, Unexpected
 from .evaluate import SATISFIED_UNPROVEN, VIOLATED
+from .isodate import calendar_day
 from .policy import Policy
 
 EXIT_OK = 0
@@ -44,6 +44,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return EXIT_ERROR
     except BrokenPipeError:
         return EXIT_OK
+    except OSError as error:
+        _emit_error(
+            FileProblem(
+                f"{error.strerror or type(error).__name__}: {error.filename or error}",
+                remedy="Check the path exists and is writable or readable as needed.",
+                details={"path": str(error.filename) if error.filename else None},
+            ),
+            args,
+        )
+        return EXIT_ERROR
+    except Exception as error:
+        _emit_error(
+            Unexpected(
+                f"{type(error).__name__}: {error}",
+                remedy="This is a bug in splitproof. Please report it with the inputs.",
+            ),
+            args,
+        )
+        return EXIT_ERROR
 
 
 def _emit_error(error: SplitproofError, args: argparse.Namespace) -> None:
@@ -207,8 +226,7 @@ def _cmd_split(args: argparse.Namespace) -> int:
         "constraints": outcome.certificate["constraints"],
         "diagnostics": outcome.certificate["diagnostics"],
     }
-    _render(args, payload, outcome.certificate)
-    return _outcome_exit(args, outcome.certificate, outcome.ok)
+    return _render(args, payload, outcome.certificate, _outcome_exit(args, outcome.certificate, outcome.ok))
 
 
 def _cmd_audit(args: argparse.Namespace) -> int:
@@ -236,8 +254,7 @@ def _cmd_audit(args: argparse.Namespace) -> int:
         "constraints": outcome.certificate["constraints"],
         "diagnostics": outcome.certificate["diagnostics"],
     }
-    _render(args, payload, outcome.certificate)
-    return _outcome_exit(args, outcome.certificate, outcome.ok)
+    return _render(args, payload, outcome.certificate, _outcome_exit(args, outcome.certificate, outcome.ok))
 
 
 def _cmd_verify(args: argparse.Namespace) -> int:
@@ -251,31 +268,32 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         **_pair_budget(args),
         backend_overrides=_overrides(args.backend),
     )
+    code, why = _verify_exit(args, result)
     if args.json:
-        json.dump(result.to_dict(), sys.stdout, indent=2, sort_keys=True)
+        payload = result.to_dict()
+        payload["verified"] = result.ok
+        payload["ok"] = code == EXIT_OK
+        json.dump(payload, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
     else:
         print(report_module.text_checks(result.checks))
         print()
         print("verified" if result.ok else "NOT verified")
+        if why:
+            print(why, file=sys.stderr)
+    return code
+
+
+def _verify_exit(args: argparse.Namespace, result: cert_module.VerifyResult) -> Tuple[int, str]:
     if not result.ok:
-        return EXIT_ERROR
+        return EXIT_ERROR, ""
     if result.status == VIOLATED:
-        if not args.json:
-            print(
-                "the certificate verifies, and it records a violated constraint",
-                file=sys.stderr,
-            )
-        return EXIT_VIOLATED
+        return EXIT_VIOLATED, "the certificate verifies, and it records a violated constraint"
     if args.require_exact and result.status == SATISFIED_UNPROVEN:
-        if not args.json:
-            print(
-                "the certificate verifies, but --require-exact was set and it is not proven "
-                "exhaustively",
-                file=sys.stderr,
-            )
-        return EXIT_VIOLATED
-    return EXIT_OK
+        return EXIT_VIOLATED, (
+            "the certificate verifies, but --require-exact was set and it is not proven exhaustively"
+        )
+    return EXIT_OK, ""
 
 
 def _cmd_units(args: argparse.Namespace) -> int:
@@ -323,12 +341,14 @@ def _cmd_explain(args: argparse.Namespace) -> int:
     return EXIT_OK if certificate.get("status") != VIOLATED else EXIT_VIOLATED
 
 
-def _render(args: argparse.Namespace, payload: Dict[str, Any], certificate: Dict[str, Any]) -> None:
+def _render(args: argparse.Namespace, payload: Dict[str, Any], certificate: Dict[str, Any], code: int) -> int:
+    payload["ok"] = code == EXIT_OK
     if args.json:
         json.dump(payload, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
-        return
+        return code
     print(report_module.summary(certificate))
+    return code
 
 
 def _outcome_exit(args: argparse.Namespace, certificate: Dict[str, Any], ok: bool) -> int:
@@ -393,12 +413,7 @@ def _looks_like_date(values: Sequence[Optional[str]]) -> bool:
     present = [value for value in values if value][:50]
     if len(present) < 2:
         return False
-    for value in present:
-        try:
-            _dt.date.fromisoformat(str(value)[:10])
-        except ValueError:
-            return False
-    return True
+    return all(calendar_day(str(value)) is not None for value in present)
 
 
 def guess_policy(path: Path, id_column: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -512,7 +527,10 @@ def _probe_header(path: Path) -> List[str]:
 
         return list(pq.read_schema(path).names)
     delimiter = "\t" if suffix in {".tsv", ".tab"} else ","
-    first = path.read_text(encoding="utf-8-sig").splitlines()[0]
+    lines = path.read_text(encoding="utf-8-sig").splitlines()
+    if not lines:
+        raise DataError(f"{path} is empty, so there is no header to read", details={"path": str(path)})
+    first = lines[0]
     return [name.strip() for name in first.split(delimiter)]
 
 

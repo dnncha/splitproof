@@ -176,3 +176,44 @@ def test_a_malformed_tool_call_returns_an_error_not_a_crash(tmp_path: Path, monk
     )
     responses = [json.loads(line) for line in stdout.getvalue().splitlines() if line.strip()]
     assert responses[0]["result"]["isError"]
+
+
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
+
+_JSON = st.recursive(
+    st.none() | st.booleans() | st.integers() | st.floats(allow_nan=False) | st.text(max_size=8),
+    lambda children: st.lists(children, max_size=3) | st.dictionaries(st.text(max_size=8), children, max_size=3),
+    max_leaves=8,
+)
+_METHODS = st.sampled_from(["initialize", "ping", "tools/list", "tools/call", "nope", "notifications/initialized"])
+_ARGUMENTS = st.dictionaries(
+    st.sampled_from(["policy", "data", "cert", "split", "out", "tolerance", "require_exact", "markdown", "skip_neighbours"]),
+    _JSON,
+    max_size=4,
+)
+
+
+@st.composite
+def _messages(draw):
+    message: Dict[str, Any] = {"jsonrpc": "2.0", "method": draw(_METHODS)}
+    if draw(st.booleans()):
+        message["id"] = draw(st.integers(0, 10**6) | st.text(min_size=1, max_size=6))
+    if message["method"] == "tools/call" and draw(st.booleans()):
+        message["params"] = {"name": draw(st.sampled_from(sorted(mcp.HANDLERS))), "arguments": draw(_ARGUMENTS)}
+    else:
+        message["params"] = draw(_JSON)
+    return message
+
+
+@settings(max_examples=150, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(batch=st.lists(_messages(), min_size=1, max_size=4))
+def test_no_message_kills_the_server_and_only_requests_are_answered(tmp_path, monkeypatch, batch):
+    monkeypatch.chdir(tmp_path)
+    responses = _drive(batch + [{"jsonrpc": "2.0", "id": "last", "method": "ping"}])
+    expected = [message["id"] for message in batch if "id" in message] + ["last"]
+    assert [response["id"] for response in responses] == expected
+    for response in responses:
+        if "result" in response and "structuredContent" in response["result"]:
+            error = response["result"]["structuredContent"].get("error") or {}
+            assert error.get("code") != "UNEXPECTED", error

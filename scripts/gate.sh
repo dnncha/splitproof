@@ -9,6 +9,12 @@ if [ ! -x "$PYTHON" ]; then
 fi
 PYTHON="$(cd "$(dirname "$PYTHON")" && pwd)/$(basename "$PYTHON")"
 
+echo "== lint =="
+"$PYTHON" -m ruff check src tools tests
+
+echo "== types =="
+"$PYTHON" -m mypy src/splitproof
+
 echo "== unbounded-accumulation rule =="
 "$PYTHON" tools/no_unbounded_pairs.py .
 

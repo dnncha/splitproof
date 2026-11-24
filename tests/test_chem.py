@@ -347,3 +347,15 @@ def test_canonical_smiles_reports_unparsable_input():
     result = CanonicalSmiles().pairs_above(["CCO", "@@@nope@@@", None], "molecule", 1.0)
     assert result.unparsable == [1]
     assert result.missing == [1, 2]
+
+
+def test_different_inorganic_salts_are_not_merged():
+    from splitproof.sim.chem import CanonicalSmiles
+
+    backend = CanonicalSmiles()
+    if not backend.available():
+        pytest.skip("rdkit is not installed")
+    groups = backend.pairs_above(["[Na+].[Cl-]", "[Na+].[Br-]", "[K+].[Cl-]", "[Cl-].[Na+]"], "molecule", 1.0).groups
+    assert groups is not None
+    assert len({groups[0], groups[1], groups[2]}) == 3
+    assert groups[0] == groups[3]

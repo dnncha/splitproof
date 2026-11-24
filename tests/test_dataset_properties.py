@@ -106,11 +106,28 @@ def test_an_unknown_column_lists_what_is_available(tmp_path):
     assert "seq" in error.value.details["available"]
 
 
-def test_ragged_rows_do_not_crash(tmp_path):
-    path = _write(tmp_path, "r.csv", "id,a,b\n1,x\n2,y,z,extra\n3\n")
+@pytest.mark.parametrize(
+    "body,line,found",
+    [
+        ("a,kinase,G1,MKV\nb,kinase, putative,G1,MKA\nc,phos,G2,MKL\n", 3, 5),
+        ("a,kinase,G1,MKV\nb,kinase,G1\n", 3, 3),
+        ("a,kinase,G1,MKV\nb\n", 3, 1),
+    ],
+)
+def test_a_ragged_row_is_refused_rather_than_shifted_into_the_wrong_columns(tmp_path, body, line, found):
+    path = _write(tmp_path, "r.csv", "id,name,group,sequence\n" + body)
+    with pytest.raises(DataError) as error:
+        dataset_module.load(path, "id")
+    assert error.value.details["line"] == line
+    assert error.value.details["found"] == found
+    assert error.value.details["expected"] == 4
+
+
+def test_a_trailing_empty_value_is_a_field_not_a_ragged_row(tmp_path):
+    path = _write(tmp_path, "r.csv", "id,group,sequence\na,G1,\nb,,MKV\n")
     data = dataset_module.load(path, "id")
-    assert data.ids == ["1", "2", "3"]
-    assert len(data.column("a")) == 3
+    assert data.column("sequence") == [None, "MKV"]
+    assert data.column("group") == ["G1", None]
 
 
 def test_only_an_empty_cell_is_missing(tmp_path):
@@ -191,3 +208,48 @@ def test_nul_bytes_are_refused_the_same_way_on_every_python(tmp_path):
     binary.write_bytes(b"\x00\x01\x02\x03")
     with pytest.raises(DataError):
         dataset_module.load(binary, "id")
+
+
+@pytest.mark.parametrize("value", ["20200105", "2020-W01-1", "2020-01-05 garbage", "2020-1-5", "2020-001", "2020-01-05T"])
+def test_only_an_iso_calendar_date_is_a_date_on_every_python(tmp_path, value):
+    path = _write(tmp_path, "d.csv", f"id,when\na,{value}\n")
+    with pytest.raises(DataError) as error:
+        dataset_module.load(path, "id").dates("when")
+    assert error.value.details["value"] == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["2020-01-05", "2020-01-05T10:00", "2020-01-05 10:00:00", "2020-01-05T10:00:00.123Z", "2020-01-05T10:00:00+01:00"],
+)
+def test_an_iso_date_or_timestamp_reads_as_its_calendar_day(tmp_path, value):
+    import datetime
+
+    path = _write(tmp_path, "d.csv", f"id,when\na,{value}\n")
+    assert dataset_module.load(path, "id").dates("when") == [datetime.date(2020, 1, 5)]
+
+
+def test_a_repeated_column_name_is_refused(tmp_path):
+    path = _write(tmp_path, "r.csv", "id,group,group,sequence\nx1,G1,G2,ACGT\nx2,G3,G4,TTTT\n")
+    with pytest.raises(DataError) as error:
+        dataset_module.load(path, "id")
+    assert error.value.details["column"] == "group"
+    assert error.value.details["positions"] == [2, 3]
+
+
+def test_a_fasta_bom_does_not_lose_the_first_record(tmp_path):
+    path = tmp_path / "bom.fasta"
+    path.write_text("﻿>seq1\nACGTACGTACGT\n>seq2\nTTTTGGGGCCCC\n", encoding="utf-8")
+    assert dataset_module.load(path, "id").ids == ["seq1", "seq2"]
+
+
+def test_fasta_comment_lines_are_not_sequence(tmp_path):
+    path = _write(tmp_path, "c.fasta", ";comment\n>s1\n;another\nACGT\n")
+    assert dataset_module.load(path, "id").column("sequence") == ["ACGT"]
+
+
+def test_fasta_sequence_before_any_header_is_refused(tmp_path):
+    path = _write(tmp_path, "o.fasta", "ACGT\n>s1\nACGT\n")
+    with pytest.raises(DataError) as error:
+        dataset_module.load(path, "id")
+    assert error.value.details["line"] == 1

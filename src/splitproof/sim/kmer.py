@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, ClassVar, Dict, Mapping, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -10,11 +10,11 @@ from . import (
     EXACT,
     LOWER_BOUND,
     Neighbour,
-    PairSet,
     SimilarityBackend,
     SimilarityResult,
     PairCollector,
     guard_candidate_budget,
+    normalise_sequence,
     tie_ranks,
     register,
 )
@@ -40,7 +40,7 @@ def kmer_size(kind: str) -> int:
 
 
 def tokenise(value: str, k: int) -> List[str]:
-    text = value.strip().upper()
+    text = normalise_sequence(value)
     if not text:
         return []
     if len(text) <= k:
@@ -90,7 +90,7 @@ class ExactJaccard(SimilarityBackend):
     name = "exact_jaccard"
     metric = "kmer_jaccard"
     exactness = EXACT
-    policy_params = {"k": (int, 1, 64)}
+    policy_params: ClassVar[Mapping[str, Tuple[type, Any, Any]]] = {"k": (int, 1, 64)}
 
     def __init__(self, k: Optional[int] = None):
         self.k = k
@@ -213,7 +213,7 @@ class MinHashJaccard(SimilarityBackend):
     name = "minhash"
     metric = "kmer_jaccard"
     exactness = LOWER_BOUND
-    policy_params = {
+    policy_params: ClassVar[Mapping[str, Tuple[type, Any, Any]]] = {
         "k": (int, 1, 64),
         "num_perm": (int, 16, 4096),
         "seed": (int, 0, 2**31 - 1),

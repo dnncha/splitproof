@@ -51,6 +51,19 @@ def test_checker_catches_a_pairset_built_outside_the_collector(tmp_path: Path):
     assert "unbudgeted-pairs" in result.stderr
 
 
+def test_checker_catches_a_whole_pair_array_turned_into_python(tmp_path: Path):
+    planted = tmp_path / "src" / "splitproof"
+    planted.mkdir(parents=True)
+    (planted / "evaluate.py").write_text(
+        "def f(positions, sims):\n    return sorted(positions.tolist(), key=lambda p: -sims[p])[:20]\n",
+        encoding="utf-8",
+    )
+    result = _run_checker(tmp_path)
+    assert result.returncode == 1
+    assert "array-to-python" in result.stderr
+    assert "evaluate.py:2" in result.stderr
+
+
 def test_checker_honours_an_explicit_justification(tmp_path: Path):
     planted = tmp_path / "src" / "splitproof" / "sim"
     planted.mkdir(parents=True)
@@ -158,3 +171,70 @@ def test_crossing_pairs_are_counted_without_materialising_them(policy_dict, tmp_
     assert measured["max_cross_fold_similarity"] >= max(
         example["similarity"] for example in outcome.reports[0].examples
     )
+
+
+SPELLINGS = ["MKTAYIAKQRQISFVKSHFSRQ", "MKTAYIAKQR QISFVKSHFS RQ", "mktayiakqr\nqisfvkshfsrq", " MKTAYIAKQRQISFVKSHFSRQ\t"]
+
+
+@pytest.mark.parametrize("name", sorted(backend_table()))
+def test_every_sequence_backend_treats_spacing_and_case_as_the_same_sequence(name: str):
+    backend = backend_table()[name]()
+    if backend.metric in MOLECULE_METRICS:
+        pytest.skip(f"{name} compares molecules, not sequences")
+    if not backend.available():
+        pytest.skip(f"{name} is not installed on this machine")
+    result = backend.pairs_above(SPELLINGS, "protein", 0.95)
+    if backend.emits == "classes":
+        assert result.groups is not None
+        assert len(set(result.groups)) == 1, result.groups
+        return
+    found = {(left, right) for left, right in result.pairs.edges()}
+    expected = {(i, j) for i in range(len(SPELLINGS)) for j in range(i + 1, len(SPELLINGS))}
+    assert found == expected, f"{name} missed {sorted(expected - found)}"
+
+
+SAME_COMPOUND = [
+    ("aspirin and its sodium salt", "CC(=O)Oc1ccccc1C(=O)O", "CC(=O)Oc1ccccc1C(=O)[O-].[Na+]"),
+    ("amphetamine and its hydrochloride", "CC(N)Cc1ccccc1", "CC(N)Cc1ccccc1.Cl"),
+    ("aspirin and its tosylate", "CC(=O)Oc1ccccc1C(=O)O", "CC(=O)Oc1ccccc1C(=O)O.Cc1ccc(S(=O)(=O)O)cc1"),
+    ("two spellings of aspirin", "CC(=O)Oc1ccccc1C(=O)O", "O=C(C)Oc1ccccc1C(=O)O"),
+    ("fragment order", "Cc1ccccc1.Cl", "Cl.Cc1ccccc1"),
+]
+DIFFERENT_COMPOUNDS = [
+    ("sodium chloride and sodium bromide", "[Na+].[Cl-]", "[Na+].[Br-]"),
+    ("sodium chloride and potassium chloride", "[Na+].[Cl-]", "[K+].[Cl-]"),
+    ("benzene and cyclohexane", "c1ccccc1", "C1CCCCC1"),
+]
+SKELETON_ONLY = {"ring_systems"}
+
+
+def _molecule_backends():
+    return sorted(name for name, cls in backend_table().items() if cls.metric in MOLECULE_METRICS)
+
+
+def _related(backend, first: str, second: str) -> bool:
+    result = backend.pairs_above([first, second], "molecule", 0.99)
+    if backend.emits == "classes":
+        assert result.groups is not None
+        return result.groups[0] is not None and result.groups[0] == result.groups[1]
+    return len(result.pairs) == 1
+
+
+@pytest.mark.parametrize("name", _molecule_backends())
+@pytest.mark.parametrize("label,first,second", SAME_COMPOUND, ids=[case[0] for case in SAME_COMPOUND])
+def test_every_molecule_backend_sees_one_compound_through_salt_spelling_and_order(name, label, first, second):
+    backend = backend_table()[name]()
+    if not backend.available():
+        pytest.skip(f"{name} is not installed on this machine")
+    assert _related(backend, first, second), f"{name} separates {label}"
+
+
+@pytest.mark.parametrize("name", _molecule_backends())
+@pytest.mark.parametrize("label,first,second", DIFFERENT_COMPOUNDS, ids=[case[0] for case in DIFFERENT_COMPOUNDS])
+def test_every_molecule_backend_keeps_different_compounds_apart(name, label, first, second):
+    backend = backend_table()[name]()
+    if not backend.available():
+        pytest.skip(f"{name} is not installed on this machine")
+    if name in SKELETON_ONLY:
+        pytest.skip(f"{name} keys on the ring skeleton, so it may group different compounds by design")
+    assert not _related(backend, first, second), f"{name} merges {label}"

@@ -207,3 +207,17 @@ def test_a_valid_policy_round_trips_through_its_own_dict():
         {**policy.to_dict(), "dataset": {**policy.to_dict()["dataset"], "path": "data.csv"}}
     )
     assert again.to_dict() == policy.to_dict()
+
+
+@pytest.mark.parametrize("cutoff", ["20210101", "2021-W01-1", "2021-01-01 garbage", "2021-001"])
+def test_a_cutoff_is_read_the_same_way_on_every_python(cutoff):
+    from splitproof.policy import Policy
+
+    raw = {
+        "splitproof": 1,
+        "dataset": {"path": "d.csv", "id": "id", "dates": {"d": "date"}},
+        "scheme": {"kind": "holdout", "fractions": {"train": 0.8, "test": 0.2}},
+        "constraints": [{"kind": "temporal", "key": "d", "cutoff": cutoff}],
+    }
+    with pytest.raises(PolicyError):
+        Policy.from_dict(raw)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Sequence
 
-from .evaluate import SATISFIED, SATISFIED_UNPROVEN, VIOLATED, ConstraintReport
+from .evaluate import SATISFIED, SATISFIED_UNPROVEN, VIOLATED
 
 STATUS_WORD = {
     SATISFIED: "proven",

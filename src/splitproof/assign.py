@@ -3,16 +3,14 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Tuple
+from typing import Any, Dict, List, Sequence, Tuple
 
 from .dataset import Dataset
 from .errors import DataError
 from .errors import GiantUnit, InfeasibleSplit
-from .policy import Policy
+from .policy import DROPPED, MAX_FOLDS, UNASSIGNED, Policy
 from .units import Unit, UnitGraph
 
-DROPPED = "__dropped__"
-MAX_FOLDS = 1000
 
 
 @dataclass
@@ -93,7 +91,7 @@ def assign(policy: Policy, graph: UnitGraph, *, tolerance: float = 0.1) -> Assig
     floating = [unit for unit in graph.units if not unit.pinned]
 
     for unit in sorted(pinned, key=lambda u: (-u.size, _tiebreak(policy.seed, u))):
-        _place(unit, unit.pinned, fold_of, counts, unit_counts, label_counts)
+        _place(unit, str(unit.pinned), fold_of, counts, unit_counts, label_counts)
 
     if floating:
         largest = max(unit.size for unit in floating)
@@ -329,7 +327,6 @@ def fold_order(name: str) -> Tuple[Any, ...]:
     return tuple(int(part) if part.isdigit() else part for part in parts) + (name,)
 
 
-UNASSIGNED = "__unassigned__"
 
 
 def check_audit_folds(

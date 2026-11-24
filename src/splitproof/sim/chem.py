@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, ClassVar, Dict, Mapping, List, Optional, Sequence, Tuple
 
 from ..errors import BackendFailed
 from . import (
     DEFAULT_MAX_PAIRS,
     EXACT,
     Neighbour,
-    PairSet,
     SimilarityBackend,
     SimilarityResult,
     PairCollector,
@@ -47,7 +46,12 @@ def standardise(chemistry, molecule):
 
     Charges are then neutralised, so sodium aspirinate and aspirin, and amphetamine
     hydrochloride and amphetamine, are one compound.
+
+    A molecule with no carbon is left whole. Stripping sodium chloride and sodium
+    bromide leaves the same bare sodium ion, which would merge two different salts.
     """
+    if not any(atom.GetAtomicNum() == 6 for atom in molecule.GetAtoms()):
+        return molecule
     remover, largest, uncharger = _standardisers()
     stripped = remover.StripMol(molecule, dontRemoveEverything=True)
     if stripped is not None and stripped.GetNumHeavyAtoms():
@@ -143,7 +147,7 @@ class MorganTanimoto(_ChemBackend):
     name = "tanimoto"
     metric = "tanimoto"
     exactness = EXACT
-    policy_params = {"radius": (int, 0, 8), "bits": (int, 32, 65536)}
+    policy_params: ClassVar[Mapping[str, Tuple[type, Any, Any]]] = {"radius": (int, 0, 8), "bits": (int, 32, 65536)}
 
     def __init__(self, radius: int = RADIUS_DEFAULT, bits: int = BITS_DEFAULT):
         self.radius = radius
@@ -184,7 +188,7 @@ class MorganTanimoto(_ChemBackend):
             if not tail:
                 break
             sims = DataStructs.BulkTanimotoSimilarity(prints[i], [prints[j] for j in tail])
-            for j, sim in zip(tail, sims):
+            for j, sim in zip(tail, sims, strict=True):
                 if sim >= threshold:
                     collector.add(i, j, sim)
         notes = [

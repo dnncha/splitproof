@@ -78,7 +78,7 @@ class UnitGraph:
 
     def to_dict(self) -> Dict[str, object]:
         sizes = sorted((unit.size for unit in self.units), reverse=True)
-        total = sum(sizes) or 1
+        total = sum(sizes)
         return {
             "units": len(self.units),
             "entities": total,
@@ -269,14 +269,14 @@ def build(
                     merged += 1
         merge_counts[identifier] = merged
 
-    for constraint in policy.disjoint_constraints:
-        values = data.column(constraint.key)
+    for disjoint in policy.disjoint_constraints:
+        values = data.column(disjoint.key)
         if size and all(value is None for value in values):
             raise VacuousConstraint(
-                f"every entity lacks a value for group '{constraint.key}', so the disjoint "
+                f"every entity lacks a value for group '{disjoint.key}', so the disjoint "
                 "constraint could never bind and a clean result would prove nothing",
                 remedy="Check the column name and that it actually holds group labels.",
-                details={"constraint": f"disjoint:{constraint.key}", "key": constraint.key, "entities": size},
+                details={"constraint": f"disjoint:{disjoint.key}", "key": disjoint.key, "entities": size},
             )
         buckets: Dict[str, int] = {}
         merged = 0
@@ -286,7 +286,7 @@ def build(
             anchor = buckets.setdefault(value, i)
             if anchor != i and union.union(anchor, i):
                 merged += 1
-        merge_counts[f"disjoint:{constraint.key}"] = merged
+        merge_counts[f"disjoint:{disjoint.key}"] = merged
 
     groups: Dict[int, List[int]] = {}
     for i in range(size):
@@ -355,8 +355,8 @@ def _temporal_pins(
                 details={"constraint": f"temporal:{constraint.key}", "column": column},
             )
         for root, members in groups.items():
-            before = [m for m in members if dates[m] is not None and dates[m] < constraint.cutoff]
-            after = [m for m in members if dates[m] is not None and dates[m] >= constraint.cutoff]
+            before = [m for m in members if (when := dates[m]) is not None and when < constraint.cutoff]
+            after = [m for m in members if (when := dates[m]) is not None and when >= constraint.cutoff]
             if before and after:
                 spanning += 1
                 if constraint.on_span == "error":

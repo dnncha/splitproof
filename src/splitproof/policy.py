@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .digest import canonical
+from .isodate import calendar_day
 from .errors import PolicyError
 
 POLICY_VERSION = 1
@@ -123,20 +124,14 @@ def _as_date(value: Any, where: str) -> _dt.date:
     if isinstance(value, _dt.date):
         return value
     text = str(value)
-    if len(text) > 10 and text[10] not in {"T", " "}:
+    day = calendar_day(text)
+    if day is None:
         raise PolicyError(
-            f"{where} has trailing characters after the date: {value!r}",
+            f"{where} is not an ISO date: {value!r}",
             remedy="Use YYYY-MM-DD, optionally followed by T or a space and a time.",
             details={"where": where, "value": text},
         )
-    try:
-        return _dt.date.fromisoformat(text[:10])
-    except ValueError as exc:
-        raise PolicyError(
-            f"{where} is not an ISO date: {value!r}",
-            remedy="Use YYYY-MM-DD.",
-            details={"where": where, "value": str(value)},
-        ) from exc
+    return day
 
 
 @dataclass(frozen=True)
@@ -229,6 +224,11 @@ class TemporalConstraint:
 
 Constraint = Any
 
+DROPPED = "__dropped__"
+UNASSIGNED = "__unassigned__"
+RESERVED_FOLD_PREFIX = "__"
+MAX_FOLDS = 1000
+
 
 @dataclass(frozen=True)
 class Scheme:
@@ -265,6 +265,12 @@ class Scheme:
             folds = _as_int(raw.get("folds", 5), f"{where}.folds")
             if folds < 2:
                 raise PolicyError("scheme.folds must be at least 2", details={"where": where, "value": folds})
+            if folds > MAX_FOLDS:
+                raise PolicyError(
+                    f"scheme.folds is {folds}, above the {MAX_FOLDS} cap",
+                    remedy="Use a modest fold count. Each fold costs memory before any data is read.",
+                    details={"where": f"{where}.folds", "value": folds, "cap": MAX_FOLDS},
+                )
             return Scheme(kind=kind, folds=folds)
         if kind == "leave-unit-out":
             return Scheme(kind=kind)
@@ -281,10 +287,24 @@ class Scheme:
                 "scheme.fractions must map at least two fold names to fractions",
                 details={"where": f"{where}.fractions"},
             )
-        fractions = {
-            _as_text(k, f"{where}.fractions"): _as_float(v, f"{where}.fractions.{k}")
-            for k, v in fractions_raw.items()
-        }
+        fractions: Dict[str, float] = {}
+        for raw_name, raw_value in fractions_raw.items():
+            name = _as_text(raw_name, f"{where}.fractions")
+            if name.startswith(RESERVED_FOLD_PREFIX):
+                raise PolicyError(
+                    f"fold name {name!r} is reserved: names starting with "
+                    f"{RESERVED_FOLD_PREFIX!r} mark rows splitproof dropped or left unassigned",
+                    remedy="Rename the fold.",
+                    details={"where": f"{where}.fractions", "value": name},
+                )
+            if name in fractions:
+                raise PolicyError(
+                    f"fold name {name!r} appears twice in scheme.fractions once surrounding "
+                    "whitespace is removed",
+                    remedy="Give every fold a distinct name.",
+                    details={"where": f"{where}.fractions", "value": name},
+                )
+            fractions[name] = _as_float(raw_value, f"{where}.fractions.{name}")
         for name, value in fractions.items():
             if value <= 0:
                 raise PolicyError(
@@ -507,9 +527,9 @@ def _parse_constraints(raw: Any, dataset: DatasetSpec) -> List[Constraint]:
     if not isinstance(raw, list):
         raise PolicyError("constraints must be a list", details={"where": "constraints"})
     out: List[Constraint] = []
-    for index, item in enumerate(raw):
+    for index, raw_item in enumerate(raw):
         where = f"constraints[{index}]"
-        item = _as_mapping(item, where)
+        item = _as_mapping(raw_item, where)
         kind = _as_text(_require(item, "kind", where), f"{where}.kind")
         if kind == "similarity":
             out.append(_parse_similarity(item, where, dataset))

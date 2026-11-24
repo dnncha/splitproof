@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, TextIO
 from . import __version__, api, cert as cert_module, dataset as dataset_module
 from . import report as report_module
 from . import units as units_module
-from .errors import SplitproofError
+from .errors import ArgumentsInvalid, SplitproofError
 from .policy import Policy
 
 FALLBACK_PROTOCOL = "2025-06-18"
@@ -148,11 +148,36 @@ def _summarise(certificate: Dict[str, Any], extra: Optional[Dict[str, Any]] = No
     return payload
 
 
+def _required(arguments: Dict[str, Any], name: str) -> Any:
+    value = arguments.get(name)
+    if value is None or value == "":
+        raise ArgumentsInvalid(f"argument '{name}' is required", details={"argument": name})
+    if not isinstance(value, str):
+        raise ArgumentsInvalid(
+            f"argument '{name}' must be a string, got {type(value).__name__}", details={"argument": name}
+        )
+    return value
+
+
+def _number(arguments: Dict[str, Any], name: str, default: float) -> float:
+    value = arguments.get(name, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:
+        raise ArgumentsInvalid(f"argument '{name}' must be a number", details={"argument": name, "value": str(value)})
+    return float(value)
+
+
+def _flag(arguments: Dict[str, Any], name: str) -> bool:
+    value = arguments.get(name, False)
+    if not isinstance(value, bool):
+        raise ArgumentsInvalid(f"argument '{name}' must be true or false", details={"argument": name, "value": str(value)})
+    return value
+
+
 def _do_init(arguments: Dict[str, Any]) -> Dict[str, Any]:
     from .cli import guess_policy, _write_policy
 
     out = _writable(arguments.get("out"), "policy.yaml")
-    policy, seen = guess_policy(Path(arguments["data"]), arguments.get("id_column"))
+    policy, seen = guess_policy(Path(_required(arguments, "data")), arguments.get("id_column"))
     _write_policy(out, policy)
     return {
         "ok": True,
@@ -168,23 +193,23 @@ def _do_init(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _do_split(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    policy = Policy.load(Path(arguments["policy"]))
+    policy = Policy.load(Path(_required(arguments, "policy")))
     outcome = api.make_split(
         policy,
         data_path=_path(arguments.get("data")),
-        tolerance=float(arguments.get("tolerance", api.DEFAULT_TOLERANCE)),
-        skip_neighbours=bool(arguments.get("skip_neighbours", False)),
+        tolerance=_number(arguments, "tolerance", api.DEFAULT_TOLERANCE),
+        skip_neighbours=_flag(arguments, "skip_neighbours"),
     )
     out = _writable(arguments.get("out"), "split.csv")
     certificate_path = _writable(arguments.get("cert"), "splitproof.cert.json")
     api.write_split(out, outcome.data, outcome.assignment, policy.dataset.id_column)
     cert_module.write(certificate_path, outcome.certificate)
     if arguments.get("report"):
-        _writable(arguments["report"], "report.md").write_text(
+        _writable(arguments.get("report"), "report.md").write_text(
             report_module.markdown(outcome.certificate), encoding="utf-8"
         )
     ok = outcome.ok
-    if arguments.get("require_exact") and outcome.certificate["status"] == "satisfied_unproven":
+    if _flag(arguments, "require_exact") and outcome.certificate["status"] == "satisfied_unproven":
         ok = False
     return _summarise(
         outcome.certificate,
@@ -193,18 +218,18 @@ def _do_split(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _do_audit(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    policy = Policy.load(Path(arguments["policy"]))
+    policy = Policy.load(Path(_required(arguments, "policy")))
     outcome = api.audit(
         policy,
         data_path=_path(arguments.get("data")),
         split_column=arguments.get("split_column"),
         split_path=_path(arguments.get("split")),
-        skip_neighbours=bool(arguments.get("skip_neighbours", False)),
+        skip_neighbours=_flag(arguments, "skip_neighbours"),
     )
     if arguments.get("cert"):
-        cert_module.write(_writable(arguments["cert"], "audit.cert.json"), outcome.certificate)
+        cert_module.write(_writable(_required(arguments, "cert"), "audit.cert.json"), outcome.certificate)
     if arguments.get("report"):
-        _writable(arguments["report"], "leakage.md").write_text(
+        _writable(arguments.get("report"), "leakage.md").write_text(
             report_module.markdown(outcome.certificate), encoding="utf-8"
         )
     return _summarise(outcome.certificate, {"ok": outcome.ok})
@@ -212,14 +237,14 @@ def _do_audit(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 def _do_verify(arguments: Dict[str, Any]) -> Dict[str, Any]:
     result = api.verify(
-        Path(arguments["cert"]),
+        Path(_required(arguments, "cert")),
         data_path=_path(arguments.get("data")),
         split_path=_path(arguments.get("split")),
         split_column=arguments.get("split_column"),
-        skip_neighbours=bool(arguments.get("skip_neighbours", False)),
+        skip_neighbours=_flag(arguments, "skip_neighbours"),
     )
     payload = result.to_dict()
-    unproven = arguments.get("require_exact") and result.status == "satisfied_unproven"
+    unproven = _flag(arguments, "require_exact") and result.status == "satisfied_unproven"
     payload["ok"] = result.ok and result.status != "violated" and not unproven
     payload["verified"] = result.ok
     payload["summary"] = (
@@ -233,16 +258,16 @@ def _do_verify(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _do_units(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    policy = Policy.load(Path(arguments["policy"]))
+    policy = Policy.load(Path(_required(arguments, "policy")))
     data = dataset_module.load_for(policy, _path(arguments.get("data")))
     return units_module.build(policy, data).to_dict()
 
 
 def _do_explain(arguments: Dict[str, Any]) -> Dict[str, Any]:
-    certificate = cert_module.read(Path(arguments["cert"]))
+    certificate = cert_module.read(Path(_required(arguments, "cert")))
     body = (
         report_module.markdown(certificate)
-        if arguments.get("markdown")
+        if _flag(arguments, "markdown")
         else report_module.summary(certificate)
     )
     return {"status": certificate.get("status"), "text": body}
@@ -296,9 +321,14 @@ def handle(message: Any) -> Optional[Dict[str, Any]]:
             "error": {"code": -32600, "message": "a JSON-RPC message must be an object"},
         }
     method = message.get("method")
+    if "id" not in message:
+        return None
     identifier = message.get("id")
     if method == "initialize":
-        requested = (message.get("params") or {}).get("protocolVersion") or FALLBACK_PROTOCOL
+        params = message.get("params")
+        requested = params.get("protocolVersion") if isinstance(params, dict) else None
+        if not isinstance(requested, str) or not requested:
+            requested = FALLBACK_PROTOCOL
         return _result(
             identifier,
             {
@@ -314,8 +344,6 @@ def handle(message: Any) -> Optional[Dict[str, Any]]:
                 ),
             },
         )
-    if method in {"notifications/initialized", "initialized"}:
-        return None
     if method == "ping":
         return _result(identifier, {})
     if method == "tools/list":
@@ -328,8 +356,6 @@ def handle(message: Any) -> Optional[Dict[str, Any]]:
         if not isinstance(arguments, dict):
             arguments = {}
         return _result(identifier, call_tool(str(params.get("name") or ""), arguments))
-    if identifier is None:
-        return None
     return {
         "jsonrpc": "2.0",
         "id": identifier,
@@ -344,8 +370,8 @@ def _result(identifier: Any, result: Dict[str, Any]) -> Dict[str, Any]:
 def serve(stdin: Optional[TextIO] = None, stdout: Optional[TextIO] = None) -> int:
     source = stdin or sys.stdin
     sink = stdout or sys.stdout
-    for line in source:
-        line = line.strip()
+    for raw_line in source:
+        line = raw_line.strip()
         if not line:
             continue
         try:
@@ -356,7 +382,15 @@ def serve(stdin: Optional[TextIO] = None, stdout: Optional[TextIO] = None) -> in
             )
             sink.flush()
             continue
-        response = handle(message)
+        try:
+            response = handle(message)
+        except Exception as error:
+            identifier = message.get("id") if isinstance(message, dict) else None
+            response = {
+                "jsonrpc": "2.0",
+                "id": identifier,
+                "error": {"code": -32603, "message": f"internal error: {type(error).__name__}: {error}"},
+            }
         if response is not None:
             sink.write(json.dumps(response) + "\n")
             sink.flush()

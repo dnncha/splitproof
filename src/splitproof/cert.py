@@ -120,7 +120,25 @@ def read(path: Path) -> Dict[str, Any]:
             remedy=f"This build reads schema {SCHEMA}.",
             details={"schema": schema, "supported": SCHEMA},
         )
+    for section, shape in SECTION_SHAPES.items():
+        if not isinstance(loaded.get(section), shape):
+            raise CertificateMismatch(
+                f"{path} has no readable '{section}' section",
+                remedy="Pass the splitproof.cert.json produced by 'splitproof split', unedited.",
+                details={"path": str(path), "section": section, "expected": shape.__name__},
+            )
     return loaded
+
+
+SECTION_SHAPES: Dict[str, type] = {
+    "assignment": dict,
+    "constraints": list,
+    "dataset": dict,
+    "diagnostics": dict,
+    "policy": dict,
+    "status": str,
+    "units": dict,
+}
 
 
 @dataclass
@@ -184,7 +202,7 @@ def first_difference(stored: Any, fresh: Any, path: str = "") -> Optional[str]:
     if isinstance(stored, list) and isinstance(fresh, list):
         if len(stored) != len(fresh):
             return f"{path or 'value'} has {len(stored)} entries in the certificate and {len(fresh)} now"
-        for index, (left, right) in enumerate(zip(stored, fresh)):
+        for index, (left, right) in enumerate(zip(stored, fresh, strict=True)):
             deeper = first_difference(left, right, f"{path}[{index}]")
             if deeper:
                 return deeper

@@ -348,7 +348,7 @@ def test_an_audit_refuses_a_split_column_that_cannot_be_graded(tmp_path: Path, f
     from splitproof.errors import DataError
 
     rows = make_rows(families=2, members=2, seed=76)
-    for row, value in zip(rows, fold_values):
+    for row, value in zip(rows, fold_values, strict=True):
         row["fold"] = value
     path = write_csv(tmp_path / "bad-folds.csv", rows)
     with pytest.raises(DataError) as error:
@@ -478,3 +478,25 @@ def test_a_key_populated_on_one_row_is_not_proven(tmp_path: Path):
     assert outcome.certificate["status"] == "satisfied_unproven"
     assert outcome.reports[0].measured["values_absent"] == len(rows) - 1
     assert any("unconstrained" in note for note in outcome.reports[0].notes)
+
+
+@pytest.mark.parametrize("name", ["__dropped__", "__unassigned__", "__anything"])
+def test_a_reserved_fold_name_is_refused_at_parse_time(tmp_path: Path, name: str):
+    path = write_csv(tmp_path / "d.csv", make_rows(families=2, members=2, seed=3))
+    with pytest.raises(PolicyError) as error:
+        Policy.from_dict(_policy(path, scheme={"kind": "holdout", "fractions": {"train": 0.5, name: 0.5}}))
+    assert "reserved" in error.value.message
+
+
+def test_fold_names_that_differ_only_by_whitespace_are_refused(tmp_path: Path):
+    path = write_csv(tmp_path / "d.csv", make_rows(families=2, members=2, seed=3))
+    with pytest.raises(PolicyError) as error:
+        Policy.from_dict(_policy(path, scheme={"kind": "holdout", "fractions": {"train": 8, " train": 1, "test": 1}}))
+    assert "twice" in error.value.message
+
+
+def test_an_absurd_fold_count_is_refused_before_any_work(tmp_path: Path):
+    path = write_csv(tmp_path / "d.csv", make_rows(families=2, members=2, seed=3))
+    with pytest.raises(PolicyError) as error:
+        Policy.from_dict(_policy(path, scheme={"kind": "kfold", "folds": 10**9}))
+    assert error.value.details["cap"] == 1000

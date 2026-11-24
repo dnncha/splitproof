@@ -1,20 +1,17 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence
 
 from . import (
     DEFAULT_MAX_PAIRS,
     EXACT,
     Neighbour,
-    PairSet,
     SimilarityBackend,
+    SEQUENCE_KINDS,
     SimilarityResult,
-    PairCollector,
+    normalise_sequence,
     register,
 )
-
-
-SEQUENCE_KINDS = {"protein", "dna", "rna"}
 
 
 def _normalise(value: str, kind: str) -> str:
@@ -24,8 +21,9 @@ def _normalise(value: str, kind: str) -> str:
     benzene and cyclohexane the same molecule. Sequence alphabets are
     case-insensitive, so folding there is correct.
     """
-    text = "".join(value.split())
-    return text.upper() if kind in SEQUENCE_KINDS else text
+    if kind in SEQUENCE_KINDS:
+        return normalise_sequence(value)
+    return "".join(value.split())
 
 
 @register("exact_duplicate")

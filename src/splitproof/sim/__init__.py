@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, ClassVar, Dict, Mapping, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 import math
 
@@ -78,7 +78,7 @@ class PairSet:
             rows = self.rows[start:stop].tolist()
             cols = self.cols[start:stop].tolist()
             sims = self.sims[start:stop].tolist()
-            for triple in zip(rows, cols, sims):
+            for triple in zip(rows, cols, sims, strict=True):
                 yield triple
 
     def edges(self) -> Iterator[Tuple[int, int]]:
@@ -87,7 +87,7 @@ class PairSet:
             stop = min(start + self.CHUNK, total)
             rows = self.rows[start:stop].tolist()
             cols = self.cols[start:stop].tolist()
-            for pair in zip(rows, cols):
+            for pair in zip(rows, cols, strict=True):
                 yield pair
 
     def __getitem__(self, position: int) -> Tuple[int, int, float]:
@@ -152,6 +152,20 @@ class PairCollector:
             )
             self._triples = []
         return PairSet.from_blocks(self._blocks)
+
+
+SEQUENCE_KINDS = frozenset({"protein", "dna", "rna"})
+
+
+def normalise_sequence(value: str) -> str:
+    """The one residue string every sequence backend compares.
+
+    Whitespace anywhere is removed, because UniProt and GenBank print sequences in
+    spaced blocks, and case is folded, because sequence alphabets carry no meaning in
+    case. Backends that each normalised their own way let an exact backend miss a pair
+    that another backend found.
+    """
+    return "".join(value.split()).upper()
 
 
 def guard_candidate_budget(count: int, max_pairs: int, backend: str, threshold: float) -> None:
@@ -236,7 +250,7 @@ class SimilarityBackend:
     metric = "abstract"
     exactness = LOWER_BOUND
     emits = "pairs"
-    policy_params: Dict[str, Tuple[type, Any, Any]] = {}
+    policy_params: ClassVar[Mapping[str, Tuple[type, Any, Any]]] = {}
 
     def version(self) -> str:
         raise NotImplementedError

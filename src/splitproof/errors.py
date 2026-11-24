@@ -55,3 +55,15 @@ class CertificateMismatch(SplitproofError):
 
 class ConstraintViolated(SplitproofError):
     code = "CONSTRAINT_VIOLATED"
+
+
+class FileProblem(SplitproofError):
+    code = "FILE_ERROR"
+
+
+class Unexpected(SplitproofError):
+    code = "UNEXPECTED"
+
+
+class ArgumentsInvalid(SplitproofError):
+    code = "ARGUMENTS_INVALID"

@@ -20,15 +20,54 @@ VIOLATED = "violated"
 MAX_EXAMPLES = 20
 
 
+@dataclass(frozen=True)
+class Coverage:
+    """What a constraint check actually saw, from which its status is derived.
+
+    No check states its own status. A clean result is `satisfied` only when the search
+    was exhaustive and every row in a fold carried a value the check could use; any
+    unbound row makes it `satisfied_unproven`, and a check that bound no row at all is
+    refused, because it proved nothing.
+    """
+
+    violations: int
+    exhaustive: bool
+    bound: int
+    unbound: int
+
+    @property
+    def status(self) -> str:
+        if self.violations:
+            return VIOLATED
+        if self.exhaustive and not self.unbound:
+            return SATISFIED
+        return SATISFIED_UNPROVEN
+
+
 @dataclass
 class ConstraintReport:
     id: str
     kind: str
     description: str
-    status: str
+    coverage: Coverage
     measured: Dict[str, Any] = field(default_factory=dict)
     examples: List[Any] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.coverage.bound == 0 and not self.coverage.violations:
+            raise VacuousConstraint(
+                f"constraint '{self.id}' bound no row in any fold, so a clean result would prove nothing",
+                remedy=(
+                    "Every row that carries a value for this key was dropped or left unassigned. "
+                    "Check the key's column, and whether on_span: drop removed the rows it guards."
+                ),
+                details={"constraint": self.id, "unbound": self.coverage.unbound},
+            )
+
+    @property
+    def status(self) -> str:
+        return self.coverage.status
 
     @property
     def ok(self) -> bool:
@@ -50,10 +89,10 @@ def check(policy: Policy, data: Dataset, assignment: Assignment, graph: UnitGrap
     reports: List[ConstraintReport] = []
     for constraint in policy.similarity_constraints:
         reports.append(_check_similarity(constraint, data, assignment, graph))
-    for constraint in policy.disjoint_constraints:
-        reports.append(_check_disjoint(constraint, data, assignment))
-    for constraint in policy.temporal_constraints:
-        reports.append(_check_temporal(constraint, policy, data, assignment))
+    for disjoint in policy.disjoint_constraints:
+        reports.append(_check_disjoint(disjoint, data, assignment))
+    for temporal in policy.temporal_constraints:
+        reports.append(_check_temporal(temporal, policy, data, assignment))
     return reports
 
 
@@ -83,14 +122,14 @@ def _check_similarity(
     }
     unparsable = len(result.unparsable) if result else 0
     absent = (len(result.missing) - unparsable) if result else 0
-    if count:
-        status = VIOLATED
-    elif unparsable or absent:
-        status = SATISFIED_UNPROVEN
-    elif result is not None and result.exactness == EXACT:
-        status = SATISFIED
-    else:
-        status = SATISFIED_UNPROVEN
+    unusable = set(result.missing) if result else set(range(len(data)))
+    in_folds = [index for index, fold in fold_of.items() if fold != DROPPED]
+    coverage = Coverage(
+        violations=count,
+        exhaustive=result is not None and result.exactness == EXACT and not unparsable,
+        bound=sum(1 for index in in_folds if index not in unusable),
+        unbound=absent,
+    )
     examples = [
         {
             "a": data.ids[left],
@@ -114,7 +153,7 @@ def _check_similarity(
             "compared; those rows sit in a fold unconstrained and the result is evidence "
             "rather than proof"
         )
-    if status == SATISFIED_UNPROVEN and not unparsable and not absent:
+    if coverage.status == SATISFIED_UNPROVEN and not unparsable and not absent:
         notes.append(
             "no crossing pair was found, but this backend does not guarantee it found every pair, "
             "so the result is evidence rather than proof"
@@ -123,7 +162,7 @@ def _check_similarity(
         id=identifier,
         kind="similarity",
         description=constraint.describe(),
-        status=status,
+        coverage=coverage,
         measured=measured,
         examples=examples,
         notes=notes,
@@ -203,51 +242,62 @@ def _crossing(
     positions = np.flatnonzero(crossing)
     crossing_sims = sims[positions]
     worst = float(crossing_sims.max())
-    identity = {index: data.ids[index] for index in range(len(data))}
-
-    def oriented(position: int) -> Tuple[int, int]:
-        left_index, right_index = int(rows[position]), int(cols[position])
-        if identity[right_index] < identity[left_index]:
-            return right_index, left_index
-        return left_index, right_index
-
-    ranked = sorted(
-        positions.tolist(),
-        key=lambda p: (-float(sims[p]), identity[oriented(p)[0]], identity[oriented(p)[1]]),
-    )[:MAX_EXAMPLES]
-    examples = [(*oriented(p), float(sims[p])) for p in ranked]
+    rank = np.empty(len(data), dtype=np.int64)
+    rank[np.argsort(np.asarray(data.ids, dtype=object), kind="stable")] = np.arange(len(data), dtype=np.int64)
+    first_rank, second_rank = rank[rows[positions]], rank[cols[positions]]
+    low_rank = np.minimum(first_rank, second_rank)
+    high_rank = np.maximum(first_rank, second_rank)
+    if len(positions) > MAX_EXAMPLES:
+        floor = np.partition(crossing_sims, len(crossing_sims) - MAX_EXAMPLES)[len(crossing_sims) - MAX_EXAMPLES]
+        contenders = np.flatnonzero(crossing_sims >= floor)
+    else:
+        contenders = np.arange(len(positions))
+    order = np.lexsort((high_rank[contenders], low_rank[contenders], -crossing_sims[contenders]))
+    chosen = contenders[order[:MAX_EXAMPLES]]
+    by_rank = np.argsort(rank)
+    examples = [
+        (int(by_rank[low_rank[c]]), int(by_rank[high_rank[c]]), float(crossing_sims[c])) for c in chosen
+    ]
     names = list(assignment.folds)
-    by_pair: Dict[str, int] = {}
     pair_left, pair_right = left[positions], right[positions]
-    for first in range(len(names)):
-        for second in range(first + 1, len(names)):
-            amount = int(
-                (
-                    ((pair_left == first) & (pair_right == second))
-                    | ((pair_left == second) & (pair_right == first))
-                ).sum()
-            )
-            if amount:
-                by_pair[f"{names[first]}|{names[second]}"] = amount
+    encoded = np.minimum(pair_left, pair_right) * len(names) + np.maximum(pair_left, pair_right)
+    codes, amounts = np.unique(encoded, return_counts=True)
+    by_pair: Dict[str, int] = {
+        f"{names[int(code) // len(names)]}|{names[int(code) % len(names)]}": int(amount)
+        for code, amount in zip(codes, amounts, strict=True)
+    }
     return count, worst, examples, dict(sorted(by_pair.items()))
 
 
 def _check_disjoint(constraint: DisjointConstraint, data: Dataset, assignment: Assignment) -> ConstraintReport:
     values = data.column(constraint.key)
     spread: Dict[str, set] = {}
+    bound = 0
+    unbound = 0
     for i, value in enumerate(values):
-        if value is None:
-            continue
         fold = assignment.fold_of.get(i, DROPPED)
         if fold == DROPPED:
             continue
+        if value is None:
+            unbound += 1
+            continue
+        bound += 1
         spread.setdefault(value, set()).add(fold)
     offenders = sorted((value for value, folds in spread.items() if len(folds) > 1))
+    notes = (
+        [
+            f"{unbound} rows in a fold have no value for '{constraint.key}', so nothing "
+            "constrains where they sit and the result is evidence rather than proof"
+        ]
+        if unbound and not offenders
+        else []
+    )
     return ConstraintReport(
         id=f"disjoint:{constraint.key}",
         kind="disjoint",
         description=constraint.describe(),
-        status=VIOLATED if offenders else SATISFIED,
+        coverage=Coverage(violations=len(offenders), exhaustive=True, bound=bound, unbound=unbound),
+        notes=notes,
         measured={
             "distinct_values": len(spread),
             "values_in_more_than_one_fold": len(offenders),
@@ -303,7 +353,7 @@ def _check_temporal(
         id=f"temporal:{constraint.key}@{constraint.cutoff.isoformat()}",
         kind="temporal",
         description=constraint.describe(),
-        status=VIOLATED if wrong_side else SATISFIED,
+        coverage=Coverage(violations=len(wrong_side), exhaustive=True, bound=checked, unbound=missing),
         measured={
             "cutoff": constraint.cutoff.isoformat(),
             "items_checked": checked,
@@ -313,7 +363,12 @@ def _check_temporal(
         },
         examples=sorted(wrong_side, key=lambda item: item["id"])[:MAX_EXAMPLES],
         notes=(
-            [f"{missing} items have no date and were left where the scheme put them"] if missing else []
+            [
+                f"{missing} items have no date and were left where the scheme put them, so "
+                "the result is evidence rather than proof"
+            ]
+            if missing and not wrong_side
+            else []
         ),
     )
 
@@ -355,7 +410,7 @@ def diagnostics(
             for fold, group in sorted(members.items())
         ]
     else:
-        targets = members.get(anchor, [])
+        targets = members.get(anchor, []) if anchor is not None else []
         queries = [index for fold, group in members.items() if fold != anchor for index in group]
         probes = [(queries, targets)]
     probes = [(q, t) for q, t in probes if q and t]

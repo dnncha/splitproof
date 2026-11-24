@@ -4,7 +4,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, ClassVar, Dict, Mapping, List, Optional, Sequence, Tuple
 
 from ..errors import BackendUnavailable
 from . import (
@@ -16,6 +16,7 @@ from . import (
     SimilarityResult,
     PairCollector,
     guard_pair_budget,
+    normalise_sequence,
     register,
 )
 
@@ -70,8 +71,8 @@ def parse_search_tsv(
     threshold: float = 0.0,
 ) -> List[Tuple[int, int, float]]:
     pairs: Dict[Tuple[int, int], float] = {}
-    for line in text.splitlines():
-        line = line.strip()
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
         fields = line.split("\t")
@@ -102,7 +103,7 @@ class MMseqs2Identity(SimilarityBackend):
     name = "mmseqs2"
     metric = "identity"
     exactness = HEURISTIC
-    policy_params = {
+    policy_params: ClassVar[Mapping[str, Tuple[type, Any, Any]]] = {
         "coverage": (float, 0.0, 1.0),
         "sensitivity": (float, 1.0, 10.0),
         "evalue": (float, 0.0, 1e6),
@@ -187,7 +188,7 @@ class MMseqs2Identity(SimilarityBackend):
     def _write_fasta(self, path: Path, values: Sequence[Optional[str]], indices: Sequence[int]) -> None:
         with path.open("w", encoding="utf-8") as handle:
             for i in indices:
-                sequence = "".join(str(values[i]).split())
+                sequence = normalise_sequence(str(values[i]))
                 handle.write(f">s{i}\n{sequence}\n")
 
     def pairs_above(

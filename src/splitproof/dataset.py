@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from .digest import digest
 from .errors import DataError
+from .isodate import calendar_day
 from .policy import Policy
 
 
@@ -44,20 +45,14 @@ class Dataset:
                 out.append(None)
                 continue
             text = str(raw)
-            if len(text) > 10 and text[10] not in {"T", " "}:
+            day = calendar_day(text)
+            if day is None:
                 raise DataError(
-                    f"column '{name}' holds {raw!r}, which has trailing characters after the date",
+                    f"column '{name}' holds {raw!r}, which is not an ISO date",
                     remedy="Use YYYY-MM-DD, optionally followed by T or a space and a time.",
                     details={"column": name, "value": text},
                 )
-            try:
-                out.append(_dt.date.fromisoformat(text[:10]))
-            except ValueError as exc:
-                raise DataError(
-                    f"column '{name}' holds {raw!r}, which is not an ISO date",
-                    remedy="Dates must be YYYY-MM-DD (a longer ISO timestamp is fine).",
-                    details={"column": name, "value": str(raw)},
-                ) from exc
+            out.append(day)
         return out
 
     def digest_for(self, policy: Policy) -> str:
@@ -68,10 +63,12 @@ class Dataset:
         if policy.dataset.label_column:
             relevant.append(policy.dataset.label_column)
         ordered = sorted(dict.fromkeys(relevant))
-        rows = []
+        rows: List[List[Optional[str]]] = []
         for i, entity_id in enumerate(self.ids):
-            rows.append([entity_id] + [self.columns.get(c, [None] * len(self.ids))[i] for c in ordered])
-        rows.sort(key=lambda row: row[0])
+            row: List[Optional[str]] = [entity_id]
+            row.extend(self.columns.get(c, [None] * len(self.ids))[i] for c in ordered)
+            rows.append(row)
+        rows.sort(key=lambda row: str(row[0]))
         return digest({"columns": ordered, "rows": rows})
 
 
@@ -139,7 +136,8 @@ def load_delimited(path: Path, id_column: str, delimiter: str) -> Dataset:
         if reader.fieldnames is None:
             raise DataError(f"{path} has no header row")
         fieldnames = [name.strip() for name in reader.fieldnames]
-        records = [dict(zip(fieldnames, row.values())) for row in reader]
+        _refuse_repeated_columns(fieldnames, path)
+        records = [_aligned_record(fieldnames, row, path, reader.line_num) for row in reader]
     except csv.Error as exc:
         raise DataError(
             f"{path} is not readable as delimited text: {exc}",
@@ -147,6 +145,35 @@ def load_delimited(path: Path, id_column: str, delimiter: str) -> Dataset:
             details={"path": str(path), "reason": str(exc)},
         ) from exc
     return _from_records(records, fieldnames, id_column, Path(path))
+
+
+def _refuse_repeated_columns(fieldnames: Sequence[str], path: Path) -> None:
+    seen: Dict[str, int] = {}
+    for position, name in enumerate(fieldnames, start=1):
+        if name in seen:
+            raise DataError(
+                f"{path} names column {name!r} twice, at positions {seen[name]} and {position}",
+                remedy="Rename one of them. splitproof cannot tell which one a policy means.",
+                details={"path": str(path), "column": name, "positions": [seen[name], position]},
+            )
+        seen[name] = position
+
+
+def _aligned_record(fieldnames: List[str], row: Dict[Any, Any], path: Path, line: int) -> Dict[str, Any]:
+    cells = [value for key, value in row.items() if key is not None]
+    extra = row.get(None) or []
+    if extra or any(value is None for value in cells):
+        found = sum(value is not None for value in cells) + len(extra)
+        raise DataError(
+            f"{path} line {line} has {found} fields where the header has {len(fieldnames)}, "
+            "so its values would land in the wrong columns",
+            remedy=(
+                "Quote any field that contains the delimiter, or fix the row so it has one value "
+                "per header column. An empty value still needs its delimiter."
+            ),
+            details={"path": str(path), "line": line, "expected": len(fieldnames), "found": found},
+        )
+    return dict(zip(fieldnames, cells, strict=True))
 
 
 def load_parquet(path: Path, id_column: str) -> Dataset:
@@ -160,6 +187,7 @@ def load_parquet(path: Path, id_column: str) -> Dataset:
         ) from exc
     table = pq.read_table(path)
     fieldnames = list(table.column_names)
+    _refuse_repeated_columns(fieldnames, Path(path))
     records = table.to_pylist()
     return _from_records(records, fieldnames, id_column, Path(path))
 
@@ -168,7 +196,15 @@ def load_fasta(path: Path, id_column: str, sequence_column: str = "sequence") ->
     records: List[Dict[str, Any]] = []
     current_id: Optional[str] = None
     chunks: List[str] = []
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
+    for number, line in enumerate(Path(path).read_text(encoding="utf-8-sig").splitlines(), start=1):
+        if line.startswith(";"):
+            continue
+        if line.strip() and current_id is None and not line.startswith(">"):
+            raise DataError(
+                f"{path} line {number} holds sequence before any '>' header",
+                remedy="Every sequence needs a header line above it, starting with '>'.",
+                details={"path": str(path), "line": number},
+            )
         if line.startswith(">"):
             if current_id is not None:
                 records.append({id_column: current_id, sequence_column: "".join(chunks)})

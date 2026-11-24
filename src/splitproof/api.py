@@ -136,7 +136,7 @@ def verify(
         data,
         split_column=split_column,
         split_path=split_path,
-        allow_dropped=bool(certificate.get("assignment", {}).get("dropped")),
+        allow_dropped=any(c.on_span == "drop" for c in policy.temporal_constraints),
     )
     graph = units_module.build(
         policy,
@@ -145,6 +145,7 @@ def verify(
         max_pairs=max_pairs,
         backend_overrides=backend_overrides,
     )
+    _require_policy_drops(data, assignment, graph)
     assignment.stats = assign_module.describe(policy, data, assignment, graph)
     reports = evaluate_module.check(policy, data, assignment, graph)
     diagnostics = evaluate_module.diagnostics(
@@ -157,6 +158,23 @@ def verify(
     )
     recomputed = cert_module.build(policy, data, graph, assignment, reports, diagnostics)
     return cert_module.verify(certificate, recomputed, reports)
+
+
+def _require_policy_drops(data: Dataset, assignment: Assignment, graph: units_module.UnitGraph) -> None:
+    claimed, owed = set(assignment.dropped), set(graph.dropped)
+    if claimed == owed:
+        return
+    unexplained = sorted(data.ids[i] for i in claimed - owed)
+    kept = sorted(data.ids[i] for i in owed - claimed)
+    raise DataError(
+        "the split's dropped rows are not the rows the policy drops, so it is not a split "
+        "splitproof could have produced from this policy",
+        remedy="Rebuild the split from the policy. A row may only be dropped by on_span: drop.",
+        details={
+            "dropped_without_cause": unexplained[:20],
+            "kept_but_owed_a_drop": kept[:20],
+        },
+    )
 
 
 def load_assignment(
