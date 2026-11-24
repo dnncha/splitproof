@@ -3,9 +3,18 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-PYTHON="${PYTHON:-$PWD/.venv/bin/python}"
-if [ ! -x "$PYTHON" ]; then
-  PYTHON="$(command -v python3)"
+if [ -z "${PYTHON:-}" ]; then
+  PYTHON="$PWD/.venv/bin/python"
+  if [ ! -x "$PYTHON" ]; then
+    echo "== bootstrapping .venv with the dev extras =="
+    if command -v uv >/dev/null 2>&1; then
+      uv venv -q .venv
+      uv pip install -q -p .venv/bin/python -e '.[dev]'
+    else
+      python3 -m venv .venv
+      .venv/bin/python -m pip install -q -e '.[dev]'
+    fi
+  fi
 fi
 PYTHON="$(cd "$(dirname "$PYTHON")" && pwd)/$(basename "$PYTHON")"
 
