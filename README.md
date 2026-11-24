@@ -32,7 +32,8 @@ a measured result, and a certificate anyone can re-verify against the data.
 ## How it works
 
 You declare what must not leak. `cutsite` makes the split that honours it, measures what
-it achieved, and signs the result.
+it achieved, and anchors the result to digests of the policy, the data and the
+assignment, so any change is detectable.
 
 ```yaml
 cutsite: 1
@@ -103,6 +104,11 @@ Every split writes a `cutsite.cert.json`: small, diffable, and safe to commit.
 `cutsite verify` recomputes the data digest, the assignment digest, and every constraint
 measurement, then exits non-zero if anything moved. Put it in CI and your split stops
 being a claim in a methods section.
+
+The certificate is a reproducibility anchor, not a cryptographic signature. It detects
+drift — edited data, a swapped assignment, a changed policy — and it lets a third party
+re-derive the measurements themselves. It does not attest to who produced it. Sign the
+file with your own key if you need that.
 
 ## Honesty rules
 
