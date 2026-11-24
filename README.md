@@ -209,6 +209,18 @@ Exit code 1 and a list of the worst crossing pairs, by similarity, with ids.
   error, `3` the split is infeasible as specified.
 - Deterministic under `seed`, so an agent's run reproduces exactly.
 - No network access, no telemetry, no hidden state.
+- `--require-exact` fails the build unless every constraint was proven exhaustively, so
+  an agent cannot quietly accept `satisfied_unproven` as a pass.
+
+`cutsite mcp` serves the same operations over stdio with no extra dependencies:
+
+```json
+{ "mcpServers": { "cutsite": { "command": "cutsite", "args": ["mcp"] } } }
+```
+
+Tools: `cutsite_init`, `cutsite_split`, `cutsite_audit`, `cutsite_verify`,
+`cutsite_units`, `cutsite_explain`. [`agent/SKILL.md`](agent/SKILL.md) is a drop-in skill
+file telling an agent when to reach for it and how to read the result honestly.
 
 ## Backends
 

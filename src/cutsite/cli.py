@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from . import __version__, api, cert as cert_module, dataset as dataset_module, report as report_module
 from .errors import CutsiteError, InfeasibleSplit
-from .evaluate import VIOLATED
+from .evaluate import SATISFIED_UNPROVEN, VIOLATED
 from .policy import Policy
 
 EXIT_OK = 0
@@ -86,6 +86,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="skip the nearest-neighbour diagnostics (faster, less informative)",
     )
+    common.add_argument(
+        "--require-exact",
+        action="store_true",
+        help="fail unless every constraint was proven by an exhaustive backend, not merely unviolated",
+    )
 
     split = subparsers.add_parser(
         "split", parents=[common], help="build a split and write a certificate proving it"
@@ -132,6 +137,11 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--id", default=None, help="id column, if cutsite should not guess")
     init.add_argument("--json", action="store_true")
     init.set_defaults(handler=_cmd_init)
+
+    mcp = subparsers.add_parser(
+        "mcp", help="serve cutsite to an AI agent as an MCP server over stdio"
+    )
+    mcp.set_defaults(handler=_cmd_mcp)
 
     explain = subparsers.add_parser("explain", help="print a certificate in plain language")
     explain.add_argument("cert", type=Path)
@@ -182,7 +192,7 @@ def _cmd_split(args: argparse.Namespace) -> int:
         "diagnostics": outcome.certificate["diagnostics"],
     }
     _render(args, payload, outcome.certificate)
-    return EXIT_OK if outcome.ok else EXIT_VIOLATED
+    return _outcome_exit(args, outcome.certificate, outcome.ok)
 
 
 def _cmd_audit(args: argparse.Namespace) -> int:
@@ -210,7 +220,7 @@ def _cmd_audit(args: argparse.Namespace) -> int:
         "diagnostics": outcome.certificate["diagnostics"],
     }
     _render(args, payload, outcome.certificate)
-    return EXIT_OK if outcome.ok else EXIT_VIOLATED
+    return _outcome_exit(args, outcome.certificate, outcome.ok)
 
 
 def _cmd_verify(args: argparse.Namespace) -> int:
@@ -252,6 +262,12 @@ def _cmd_units(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_mcp(args: argparse.Namespace) -> int:
+    from . import mcp as mcp_module
+
+    return mcp_module.serve()
+
+
 def _cmd_explain(args: argparse.Namespace) -> int:
     certificate = cert_module.read(args.cert)
     if args.json:
@@ -275,6 +291,24 @@ def _render(args: argparse.Namespace, payload: Dict[str, Any], certificate: Dict
         sys.stdout.write("\n")
         return
     print(report_module.summary(certificate))
+
+
+def _outcome_exit(args: argparse.Namespace, certificate: Dict[str, Any], ok: bool) -> int:
+    if not ok:
+        return EXIT_VIOLATED
+    if getattr(args, "require_exact", False) and certificate.get("status") == SATISFIED_UNPROVEN:
+        unproven = [
+            item["id"]
+            for item in certificate.get("constraints", [])
+            if item.get("status") == SATISFIED_UNPROVEN
+        ]
+        if not args.json:
+            print(
+                f"cutsite: --require-exact was set, but {unproven} were not proven exhaustively",
+                file=sys.stderr,
+            )
+        return EXIT_VIOLATED
+    return EXIT_OK
 
 
 def _looks_like_sequence(values: Sequence[Optional[str]]) -> Optional[str]:
