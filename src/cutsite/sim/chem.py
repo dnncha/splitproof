@@ -63,10 +63,7 @@ def murcko_framework(chemistry, molecule) -> Optional[str]:
         atom.SetNoImplicit(False)
         atom.SetNumExplicitHs(0)
     framework = editable.GetMol()
-    try:
-        chemistry.SanitizeMol(framework)
-    except Exception:
-        return chemistry.MolToSmiles(framework)
+    chemistry.SanitizeMol(framework)
     return chemistry.MolToSmiles(framework)
 
 
@@ -101,14 +98,17 @@ class MorganTanimoto(_ChemBackend):
         generator = generators.GetMorganGenerator(radius=self.radius, fpSize=self.bits)
         prints: List[Optional[object]] = []
         missing: List[int] = []
+        unparsable: List[int] = []
         for i, value in enumerate(values):
             molecule = Chem.MolFromSmiles(value) if value else None
             if molecule is None:
                 prints.append(None)
                 missing.append(i)
+                if value:
+                    unparsable.append(i)
                 continue
             prints.append(generator.GetFingerprint(molecule))
-        return prints, missing
+        return prints, missing, unparsable
 
     def pairs_above(
         self,
@@ -120,7 +120,7 @@ class MorganTanimoto(_ChemBackend):
     ) -> SimilarityResult:
         from rdkit import DataStructs
 
-        prints, missing = self._fingerprints(values)
+        prints, missing, unparsable = self._fingerprints(values)
         collector = PairCollector(self.name, threshold, max_pairs)
         present = [i for i, fingerprint in enumerate(prints) if fingerprint is not None]
         for position, i in enumerate(present):
@@ -132,8 +132,11 @@ class MorganTanimoto(_ChemBackend):
                 if sim >= threshold:
                     collector.add(i, j, sim)
         notes = ["Morgan/ECFP fingerprints compared by Tanimoto; computed over all pairs, so exact"]
-        if missing:
-            notes.append(f"{len(missing)} entities have no parsable SMILES and are treated as unrelated")
+        if unparsable:
+            notes.append(f"{len(unparsable)} entities hold SMILES that RDKit could not parse")
+        absent = len(missing) - len(unparsable)
+        if absent:
+            notes.append(f"{absent} entities have no SMILES at all and are treated as unrelated")
         return SimilarityResult(
             backend=self.name,
             backend_version=self.version(),
@@ -142,6 +145,7 @@ class MorganTanimoto(_ChemBackend):
             threshold=threshold,
             pairs=collector.finish(),
             missing=missing,
+            unparsable=unparsable,
             notes=notes,
             params={"radius": self.radius, "bits": self.bits},
         )
@@ -155,7 +159,7 @@ class MorganTanimoto(_ChemBackend):
     ) -> Dict[int, Optional[Neighbour]]:
         from rdkit import DataStructs
 
-        prints, _missing = self._fingerprints(values)
+        prints, _missing, _unparsable = self._fingerprints(values)
         target_list = [i for i in sorted(set(int(t) for t in targets)) if prints[i] is not None]
         out: Dict[int, Optional[Neighbour]] = {}
         for raw in queries:
@@ -178,21 +182,26 @@ class MurckoScaffold(_ChemBackend):
     metric = "scaffold"
     exactness = EXACT
 
-    def _scaffolds(self, values: Sequence[Optional[str]]) -> Tuple[List[Optional[str]], List[int]]:
+    def _scaffolds(
+        self, values: Sequence[Optional[str]]
+    ) -> Tuple[List[Optional[str]], List[int], List[int]]:
         Chem, _generators = _rdkit()
         out: List[Optional[str]] = []
         missing: List[int] = []
+        unparsable: List[int] = []
         for i, value in enumerate(values):
             molecule = Chem.MolFromSmiles(value) if value else None
             if molecule is None:
                 out.append(None)
                 missing.append(i)
+                if value:
+                    unparsable.append(i)
                 continue
             framework = murcko_framework(Chem, molecule)
             out.append(framework)
             if framework is None:
                 missing.append(i)
-        return out, missing
+        return out, missing, unparsable
 
     def pairs_above(
         self,
@@ -202,7 +211,7 @@ class MurckoScaffold(_ChemBackend):
         *,
         max_pairs: int = DEFAULT_MAX_PAIRS,
     ) -> SimilarityResult:
-        scaffolds, missing = self._scaffolds(values)
+        scaffolds, missing, unparsable = self._scaffolds(values)
         buckets: Dict[str, List[int]] = {}
         for i, scaffold in enumerate(scaffolds):
             if scaffold:
@@ -217,9 +226,12 @@ class MurckoScaffold(_ChemBackend):
             "molecules sharing a Murcko framework (ring systems plus their linkers, with all "
             "exocyclic substituents removed) are treated as one unit"
         ]
-        if missing:
+        if unparsable:
+            notes.append(f"{len(unparsable)} entities hold SMILES that RDKit could not parse")
+        acyclic = len(missing) - len(unparsable)
+        if acyclic:
             notes.append(
-                f"{len(missing)} entities have no ring system, so no framework, and are treated "
+                f"{acyclic} entities have no ring system, so no framework, and are treated "
                 "as unrelated"
             )
         return SimilarityResult(
@@ -230,6 +242,7 @@ class MurckoScaffold(_ChemBackend):
             threshold=threshold,
             pairs=pairs,
             missing=missing,
+            unparsable=unparsable,
             notes=notes,
             params={"distinct_scaffolds": len(buckets)},
         )
@@ -241,7 +254,7 @@ class MurckoScaffold(_ChemBackend):
         queries: Sequence[int],
         targets: Sequence[int],
     ) -> Dict[int, Optional[Neighbour]]:
-        scaffolds, _missing = self._scaffolds(values)
+        scaffolds, _missing, _unparsable = self._scaffolds(values)
         lookup: Dict[str, int] = {}
         for i in sorted(set(int(t) for t in targets)):
             scaffold = scaffolds[i]

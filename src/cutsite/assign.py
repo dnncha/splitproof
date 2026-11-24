@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .dataset import Dataset
-from .errors import GiantUnit, InfeasibleSplit, PolicyError
+from .errors import GiantUnit, InfeasibleSplit
 from .policy import Policy
 from .units import Unit, UnitGraph
 
@@ -60,7 +60,7 @@ class Assignment:
 
 
 def _tiebreak(seed: int, unit: Unit) -> str:
-    payload = f"{seed}:{unit.key}:{unit.size}".encode("utf-8")
+    payload = f"{seed}:{unit.signature}".encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -80,21 +80,6 @@ def assign(policy: Policy, graph: UnitGraph, *, tolerance: float = 0.1) -> Assig
         return _leave_unit_out(graph)
 
     fold_names = policy.scheme.fold_names
-    if policy.temporal_constraints and policy.scheme.kind != "holdout":
-        raise PolicyError(
-            "a temporal constraint only makes sense with a holdout scheme",
-            remedy="Use scheme.kind: holdout with named train and test fractions.",
-            details={"scheme": policy.scheme.kind},
-        )
-    for constraint in policy.temporal_constraints:
-        for side in (constraint.before, constraint.after):
-            if side not in fold_names:
-                raise PolicyError(
-                    f"temporal constraint names fold '{side}', which the scheme does not define",
-                    remedy=f"Scheme folds are {sorted(fold_names)}. Rename, or add the fraction.",
-                    details={"fold": side, "available": sorted(fold_names)},
-                )
-
     assignable = sum(unit.size for unit in graph.units)
     targets = _targets(policy, assignable, fold_names)
     counts = {name: 0 for name in fold_names}
@@ -234,6 +219,44 @@ def _leave_unit_out(graph: UnitGraph) -> Assignment:
             FoldStat(name=name, target=unit.size, count=unit.size, units=1, label_counts=dict(unit.label_counts))
         )
     return Assignment(fold_of=fold_of, folds=names, stats=stats, dropped=list(graph.dropped))
+
+
+def describe(policy: Policy, data: Dataset, assignment: Assignment, graph: UnitGraph) -> List[FoldStat]:
+    """Fold statistics derived from the finished assignment, not from how it was made.
+
+    Everything here is recomputable from the policy, the data and the fold column
+    alone, so a certificate's fold table can be re-derived by anyone verifying it.
+    """
+    from . import units as units_module
+
+    members = assignment.fold_members()
+    names = list(assignment.folds)
+    assignable = sum(len(group) for group in members.values())
+    scheme_names = policy.scheme.fold_names
+    if scheme_names and set(names) == set(scheme_names):
+        targets = _targets(policy, assignable, scheme_names)
+    else:
+        targets = {name: len(members[name]) for name in names}
+    classes, _note = units_module.label_classes(policy, data)
+    unit_of = graph.unit_of()
+    stats: List[FoldStat] = []
+    for name in names:
+        indexes = members[name]
+        labels: Dict[str, int] = {}
+        if classes is not None:
+            for index in indexes:
+                bucket = classes[index]
+                labels[bucket] = labels.get(bucket, 0) + 1
+        stats.append(
+            FoldStat(
+                name=name,
+                target=targets.get(name, len(indexes)),
+                count=len(indexes),
+                units=len({unit_of[index] for index in indexes if index in unit_of}),
+                label_counts=labels,
+            )
+        )
+    return stats
 
 
 def from_column(data: Dataset, column: str) -> Assignment:

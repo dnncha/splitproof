@@ -10,6 +10,7 @@ from .dataset import Dataset
 from .policy import DisjointConstraint, Policy, SimilarityConstraint, TemporalConstraint
 from .sim import EXACT, resolve
 from .units import UnitGraph, _constraint_id
+from .units import label_kind as units_label_kind
 
 SATISFIED = "satisfied"
 SATISFIED_UNPROVEN = "satisfied_unproven"
@@ -64,11 +65,14 @@ def _check_similarity(
     identifier = _constraint_id(constraint)
     result = graph.similarity.get(identifier)
     fold_of = assignment.fold_of
-    count, worst, worst_examples = _crossing(result, data, assignment)
+    count, worst, worst_examples, by_pair = _crossing(result, data, assignment)
     measured = {
         "pairs_at_or_above_threshold": len(result.pairs) if result else 0,
         "cross_fold_pairs_at_or_above_threshold": count,
+        "cross_fold_pairs_by_fold_pair": by_pair,
         "max_cross_fold_similarity": round(worst, 6) if worst is not None else None,
+        "values_absent": len(result.missing) if result else 0,
+        "values_unparsable": len(result.unparsable) if result else 0,
         "exactness": result.exactness if result else "unknown",
         "backend": result.backend if result else "unknown",
     }
@@ -109,14 +113,14 @@ def _crossing(
     result: Optional[Any],
     data: Dataset,
     assignment: Assignment,
-) -> Tuple[int, Optional[float], List[Tuple[int, int, float]]]:
+) -> Tuple[int, Optional[float], List[Tuple[int, int, float]], Dict[str, int]]:
     """Count cross-fold pairs without ever materialising them.
 
     The pair graph is quadratic in the worst case, so this works on the numpy
     arrays behind the PairSet and keeps only the worst MAX_EXAMPLES.
     """
     if result is None or len(result.pairs) == 0:
-        return 0, None, []
+        return 0, None, [], {}
     fold_numbers = {name: number for number, name in enumerate(assignment.folds)}
     lookup = np.full(len(data), -1, dtype=np.int64)
     for index, fold in assignment.fold_of.items():
@@ -127,13 +131,26 @@ def _crossing(
     crossing = (left >= 0) & (right >= 0) & (left != right)
     count = int(crossing.sum())
     if count == 0:
-        return 0, None, []
+        return 0, None, [], {}
     positions = np.flatnonzero(crossing)
     crossing_sims = sims[positions]
     worst = float(crossing_sims.max())
     top = positions[np.argsort(-crossing_sims, kind="stable")[:MAX_EXAMPLES]]
     examples = [(int(rows[p]), int(cols[p]), float(sims[p])) for p in top]
-    return count, worst, examples
+    names = list(assignment.folds)
+    by_pair: Dict[str, int] = {}
+    pair_left, pair_right = left[positions], right[positions]
+    for first in range(len(names)):
+        for second in range(first + 1, len(names)):
+            amount = int(
+                (
+                    ((pair_left == first) & (pair_right == second))
+                    | ((pair_left == second) & (pair_right == first))
+                ).sum()
+            )
+            if amount:
+                by_pair[f"{names[first]}|{names[second]}"] = amount
+    return count, worst, examples, dict(sorted(by_pair.items()))
 
 
 def _check_disjoint(constraint: DisjointConstraint, data: Dataset, assignment: Assignment) -> ConstraintReport:
@@ -171,6 +188,7 @@ def _check_temporal(
     dates = data.dates(column)
     wrong_side: List[Dict[str, Any]] = []
     missing = 0
+    checked = 0
     for i, when in enumerate(dates):
         fold = assignment.fold_of.get(i, DROPPED)
         if fold == DROPPED:
@@ -178,9 +196,16 @@ def _check_temporal(
         if when is None:
             missing += 1
             continue
-        expected = constraint.before if when < constraint.cutoff else constraint.after
-        if fold in (constraint.before, constraint.after) and fold != expected:
-            wrong_side.append({"id": data.ids[i], "date": when.isoformat(), "fold": fold, "expected": expected})
+        checked += 1
+        if when >= constraint.cutoff and fold == constraint.before:
+            wrong_side.append(
+                {
+                    "id": data.ids[i],
+                    "date": when.isoformat(),
+                    "fold": fold,
+                    "problem": f"dated on or after the cutoff but placed in '{constraint.before}'",
+                }
+            )
     return ConstraintReport(
         id=f"temporal:{constraint.key}@{constraint.cutoff.isoformat()}",
         kind="temporal",
@@ -188,7 +213,8 @@ def _check_temporal(
         status=VIOLATED if wrong_side else SATISFIED,
         measured={
             "cutoff": constraint.cutoff.isoformat(),
-            "items_on_wrong_side": len(wrong_side),
+            "items_checked": checked,
+            "items_after_the_cutoff_in_train": len(wrong_side),
             "items_without_a_date": missing,
             "on_span": constraint.on_span,
         },
@@ -207,17 +233,7 @@ def reference_fold(assignment: Assignment) -> Optional[str]:
     return max(assignment.stats, key=lambda stat: stat.count).name
 
 
-def _label_kind(policy: Policy, values: Sequence[Optional[str]]) -> str:
-    if policy.dataset.label_kind != "auto":
-        return policy.dataset.label_kind
-    present = [value for value in values if value is not None]
-    if not present:
-        return "categorical"
-    try:
-        numbers = [float(value) for value in present]
-    except ValueError:
-        return "categorical"
-    return "numeric" if len(set(numbers)) > 10 else "categorical"
+
 
 
 def diagnostics(
@@ -227,6 +243,7 @@ def diagnostics(
     *,
     exact_max_n: int = 20000,
     skip_neighbours: bool = False,
+    backend_overrides: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     out: Dict[str, Any] = {"reference_fold": reference_fold(assignment), "keys": {}}
     anchor = out["reference_fold"]
@@ -238,15 +255,16 @@ def diagnostics(
     if not targets or not queries:
         return out
     label_values = data.column(policy.dataset.label_column) if policy.dataset.label_column else None
-    kind = _label_kind(policy, label_values) if label_values is not None else None
+    kind = units_label_kind(policy, label_values) if label_values is not None else None
     for constraint in policy.similarity_constraints:
         key = policy.dataset.similarity[constraint.key]
         backend = resolve(
             constraint.metric,
             key.kind,
             len(data),
-            requested=constraint.backend,
+            requested=(backend_overrides or {}).get(constraint.key) or constraint.backend,
             exact_max_n=exact_max_n,
+            settings=constraint.settings,
         )
         neighbours = backend.nearest(data.column(key.column), key.kind, queries, targets)
         sims = [n.similarity for n in neighbours.values() if n is not None]
@@ -324,8 +342,10 @@ def _nn_baseline(
             "metric": "spearman",
             "value": _spearman(predicted, truth),
             "note": (
-                "a nearest-neighbour copy of the reference fold scores this much; a model that does "
-                "not clearly beat it has learned nothing beyond similarity"
+                "what a nearest-neighbour copy of the reference fold scores. Similarity reasoning "
+                "is a legitimate model, so this is neither a floor nor a ceiling: a model that "
+                "does not clearly beat it has not shown it learned anything beyond similarity, "
+                "and beating it is not on its own evidence that the split is sound"
             ),
         }
     return {

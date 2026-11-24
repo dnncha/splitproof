@@ -23,6 +23,18 @@ def summary(certificate: Dict[str, Any]) -> str:
         f"{entities} entities in {units.get('units', 0)} independent units; folds: {folds or 'none'}.",
         f"Constraint status: {STATUS_WORD.get(status, status)}.",
     ]
+    worst = _worst_neighbour(certificate)
+    if worst is not None:
+        key, value, with_neighbour, queries = worst
+        lines.append(
+            f"Worst held-out similarity to the reference fold: {value} on {key} "
+            f"({with_neighbour} of {queries} held-out items have any neighbour)."
+        )
+    if status != VIOLATED:
+        lines.append(
+            "That status covers only the constraints the policy declared. Read the numbers below "
+            "before treating this split as hard."
+        )
     for item in certificate.get("constraints", []):
         word = STATUS_WORD.get(item.get("status"), item.get("status"))
         lines.append(f"- {item.get('description')}: {word}.")
@@ -36,8 +48,8 @@ def summary(certificate: Dict[str, Any]) -> str:
         baseline = entry.get("nearest_neighbour_baseline") or {}
         if baseline.get("value") is not None:
             lines.append(
-                f"Nearest-neighbour baseline on {key}: {baseline['metric']}={baseline['value']} "
-                f"over {baseline['compared']} held-out items. Beat this or the model learned nothing."
+                f"Similarity baseline on {key}: {baseline['metric']}={baseline['value']} over "
+                f"{baseline['compared']} held-out items. Report any model score next to this one."
             )
         distribution = entry.get("nearest_reference_similarity") or {}
         if distribution:
@@ -46,6 +58,19 @@ def summary(certificate: Dict[str, Any]) -> str:
                 f"p99 {distribution.get('p99')}, max {distribution.get('max')}."
             )
     return "\n".join(lines)
+
+
+def _worst_neighbour(certificate: Dict[str, Any]):
+    best = None
+    for key, entry in (certificate.get("diagnostics", {}).get("keys") or {}).items():
+        distribution = entry.get("nearest_reference_similarity") or {}
+        value = distribution.get("max")
+        if value is None:
+            continue
+        candidate = (key, value, entry.get("with_a_neighbour"), entry.get("queries"))
+        if best is None or value > best[1]:
+            best = candidate
+    return best
 
 
 def markdown(certificate: Dict[str, Any]) -> str:
@@ -156,8 +181,7 @@ def text_checks(checks: Sequence[Dict[str, Any]]) -> str:
     lines = []
     for check in checks:
         mark = "ok  " if check.get("ok") else "FAIL"
-        lines.append(f"{mark} {check.get('name')}")
-        if not check.get("ok"):
-            lines.append(f"       expected {check.get('expected')!r}")
-            lines.append(f"       measured {check.get('measured')!r}")
+        lines.append(f"{mark} {check.get('name')}: {check.get('describes')}")
+        if not check.get("ok") and check.get("difference"):
+            lines.append(f"       {check['difference']}")
     return "\n".join(lines)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -154,6 +154,7 @@ class SimilarityResult:
     threshold: float
     pairs: PairSet = field(default_factory=PairSet.empty)
     missing: List[int] = field(default_factory=list)
+    unparsable: List[int] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     params: Dict[str, object] = field(default_factory=dict)
 
@@ -166,6 +167,7 @@ class SimilarityResult:
             "threshold": self.threshold,
             "edges": len(self.pairs),
             "missing_values": len(self.missing),
+            "unparsable_values": len(self.unparsable),
             "params": dict(sorted(self.params.items())),
             "notes": list(self.notes),
         }
@@ -222,8 +224,37 @@ def backend_table() -> Dict[str, type]:
     return dict(BACKENDS)
 
 
-def resolve(metric: str, kind: str, count: int, *, requested: Optional[str] = None, exact_max_n: int = 20000):
+def construct(cls, settings: Dict[str, Any]):
+    if not settings:
+        return cls()
+    try:
+        return cls(**settings)
+    except TypeError as exc:
+        import inspect
+
+        accepted = sorted(
+            name
+            for name in inspect.signature(cls.__init__).parameters
+            if name not in {"self"}
+        )
+        raise BackendUnavailable(
+            f"backend {getattr(cls, 'name', cls.__name__)!r} does not accept those params",
+            remedy=f"It accepts {accepted}.",
+            details={"given": sorted(settings), "accepted": accepted},
+        ) from exc
+
+
+def resolve(
+    metric: str,
+    kind: str,
+    count: int,
+    *,
+    requested: Optional[str] = None,
+    exact_max_n: int = 20000,
+    settings: Optional[Dict[str, Any]] = None,
+):
     table = backend_table()
+    settings = settings or {}
     if requested:
         if requested not in table:
             raise BackendUnavailable(
@@ -231,17 +262,19 @@ def resolve(metric: str, kind: str, count: int, *, requested: Optional[str] = No
                 remedy=f"Available backends: {sorted(table)}.",
                 details={"requested": requested, "available": sorted(table)},
             )
-        backend = table[requested]()
+        backend = construct(table[requested], settings)
     elif metric == "identity":
-        backend = table["mmseqs2"]()
+        backend = construct(table["mmseqs2"], settings)
     elif metric == "kmer_jaccard":
-        backend = table["exact_jaccard"]() if count <= exact_max_n else table["minhash"]()
+        backend = construct(
+            table["exact_jaccard"] if count <= exact_max_n else table["minhash"], settings
+        )
     elif metric == "exact_duplicate":
-        backend = table["exact_duplicate"]()
+        backend = construct(table["exact_duplicate"], settings)
     elif metric == "tanimoto":
-        backend = table["tanimoto"]()
+        backend = construct(table["tanimoto"], settings)
     elif metric == "scaffold":
-        backend = table["scaffold"]()
+        backend = construct(table["scaffold"], settings)
     else:
         raise BackendUnavailable(
             f"no backend implements metric {metric!r}",

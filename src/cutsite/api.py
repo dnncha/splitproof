@@ -54,9 +54,15 @@ def make_split(
         backend_overrides=backend_overrides,
     )
     assignment = assign_module.assign(policy, graph, tolerance=tolerance)
+    assignment.stats = assign_module.describe(policy, data, assignment, graph)
     reports = evaluate_module.check(policy, data, assignment, graph)
     diagnostics = evaluate_module.diagnostics(
-        policy, data, assignment, exact_max_n=exact_max_n, skip_neighbours=skip_neighbours
+        policy,
+        data,
+        assignment,
+        exact_max_n=exact_max_n,
+        skip_neighbours=skip_neighbours,
+        backend_overrides=backend_overrides,
     )
     certificate = cert_module.build(policy, data, graph, assignment, reports, diagnostics)
     return Outcome(
@@ -89,9 +95,15 @@ def audit(
         max_pairs=max_pairs,
         backend_overrides=backend_overrides,
     )
+    assignment.stats = assign_module.describe(policy, data, assignment, graph)
     reports = evaluate_module.check(policy, data, assignment, graph)
     diagnostics = evaluate_module.diagnostics(
-        policy, data, assignment, exact_max_n=exact_max_n, skip_neighbours=skip_neighbours
+        policy,
+        data,
+        assignment,
+        exact_max_n=exact_max_n,
+        skip_neighbours=skip_neighbours,
+        backend_overrides=backend_overrides,
     )
     certificate = cert_module.build(policy, data, graph, assignment, reports, diagnostics)
     certificate["audited"] = True
@@ -129,8 +141,13 @@ def verify(
         max_pairs=max_pairs,
         backend_overrides=backend_overrides,
     )
+    assignment.stats = assign_module.describe(policy, data, assignment, graph)
     reports = evaluate_module.check(policy, data, assignment, graph)
-    return cert_module.verify(certificate, data, assignment, reports, policy)
+    diagnostics = evaluate_module.diagnostics(
+        policy, data, assignment, exact_max_n=exact_max_n, backend_overrides=backend_overrides
+    )
+    recomputed = cert_module.build(policy, data, graph, assignment, reports, diagnostics)
+    return cert_module.verify(certificate, recomputed)
 
 
 def load_assignment(

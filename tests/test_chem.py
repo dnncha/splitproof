@@ -68,11 +68,26 @@ def test_tanimoto_separates_unrelated_series():
         assert (left < 3) == (right < 3)
 
 
-def test_unparsable_smiles_is_missing_not_fatal():
+def test_unparsable_smiles_is_distinguished_from_an_absent_one():
     result = MorganTanimoto().pairs_above(["CCO", "not a molecule", None], "molecule", 0.5)
-    assert 1 in result.missing
-    assert 2 in result.missing
-    assert any("parsable" in note for note in result.notes)
+    assert result.unparsable == [1]
+    assert result.missing == [1, 2]
+    assert any("could not parse" in note for note in result.notes)
+    assert any("no SMILES at all" in note for note in result.notes)
+
+
+def test_a_partly_unparsable_column_surfaces_the_count(tmp_path: Path):
+    path = tmp_path / "half.csv"
+    rows = ["id,smiles,activity"]
+    for position, smiles in enumerate(BENZODIAZEPINES + PYRIDINES):
+        rows.append(f"g{position},{smiles},{position}")
+    for position in range(4):
+        rows.append(f"bad{position},not a molecule,{position}")
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    outcome = api.make_split(Policy.from_dict(_policy(path, "tanimoto", 0.5)))
+    measured = outcome.reports[0].measured
+    assert measured["values_unparsable"] == 4
+    assert measured["values_absent"] == 4
 
 
 def test_scaffold_groups_a_shared_core():

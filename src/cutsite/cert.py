@@ -118,79 +118,86 @@ def policy_from(certificate: Dict[str, Any]) -> Policy:
     return Policy.from_dict(certificate["policy"])
 
 
-def verify(
-    certificate: Dict[str, Any],
-    data: Dataset,
-    assignment: Assignment,
-    reports: List[ConstraintReport],
-    policy: Policy,
-) -> VerifyResult:
+VOLATILE = ("created", "environment", "audited")
+
+SECTIONS = (
+    ("cutsite", "the certificate was produced by this build of cutsite"),
+    ("policy", "the embedded policy is the one being verified against"),
+    ("policy_digest", "the policy still hashes to the recorded digest"),
+    ("dataset", "the data file is byte-for-byte the one the split was built from"),
+    ("assignment", "the split assignment is the one the certificate describes"),
+    ("units", "the independent units, backends and their parameters are unchanged"),
+    ("constraints", "every constraint re-measures to exactly the recorded values"),
+    ("diagnostics", "the leakage diagnostics re-measure to exactly the recorded values"),
+    ("status", "the overall verdict is unchanged"),
+    ("seed", "the seed is unchanged"),
+)
+
+
+def comparable(certificate: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: value for key, value in certificate.items() if key not in VOLATILE}
+
+
+def first_difference(stored: Any, fresh: Any, path: str = "") -> Optional[str]:
+    if isinstance(stored, dict) and isinstance(fresh, dict):
+        for key in sorted(set(stored) | set(fresh)):
+            here = f"{path}.{key}" if path else str(key)
+            if key not in stored:
+                return f"{here} is present now but not in the certificate"
+            if key not in fresh:
+                return f"{here} is in the certificate but not recomputed"
+            deeper = first_difference(stored[key], fresh[key], here)
+            if deeper:
+                return deeper
+        return None
+    if isinstance(stored, list) and isinstance(fresh, list):
+        if len(stored) != len(fresh):
+            return f"{path or 'value'} has {len(stored)} entries in the certificate and {len(fresh)} now"
+        for index, (left, right) in enumerate(zip(stored, fresh)):
+            deeper = first_difference(left, right, f"{path}[{index}]")
+            if deeper:
+                return deeper
+        return None
+    if stored != fresh:
+        return f"{path or 'value'}: certificate says {stored!r}, recomputed {fresh!r}"
+    return None
+
+
+def verify(certificate: Dict[str, Any], recomputed: Dict[str, Any]) -> VerifyResult:
+    """Compare a stored certificate against one rebuilt from the data and the split.
+
+    Everything the certificate asserts is recomputed and compared, not just the
+    digests: per-constraint measured values, the unit structure, the backends and
+    their parameters, and the leakage diagnostics. A certificate whose numbers were
+    edited by hand does not verify.
+    """
+    stored = comparable(certificate)
+    fresh = comparable(recomputed)
     checks: List[Dict[str, Any]] = []
-
-    recomputed_policy = digest(policy.to_dict())
-    checks.append(
-        _check(
-            "policy_digest",
-            certificate.get("policy_digest"),
-            recomputed_policy,
-            "the policy in the certificate still hashes to the recorded digest",
-        )
-    )
-    checks.append(
-        _check(
-            "dataset_digest",
-            certificate.get("dataset", {}).get("digest"),
-            data.digest_for(policy),
-            "the data file is byte-for-byte the one the split was built from",
-        )
-    )
-    checks.append(
-        _check(
-            "assignment_digest",
-            certificate.get("assignment", {}).get("digest"),
-            assignment_digest(data, assignment),
-            "the split assignment is the one the certificate describes",
-        )
-    )
-
-    recorded = {item["id"]: item.get("status") for item in certificate.get("constraints", [])}
-    for report in reports:
-        expected = recorded.get(report.id)
+    for name, describes in SECTIONS:
+        difference = first_difference(stored.get(name), fresh.get(name), name)
         checks.append(
             {
-                "name": f"constraint:{report.id}",
-                "ok": expected == report.status and report.status != VIOLATED,
-                "expected": expected,
-                "measured": report.status,
-                "describes": report.description,
+                "name": name,
+                "ok": difference is None,
+                "describes": describes,
+                **({"difference": difference} if difference else {}),
             }
         )
-    missing = sorted(set(recorded) - {report.id for report in reports})
-    for identifier in missing:
+    extra = sorted((set(stored) | set(fresh)) - {name for name, _ in SECTIONS})
+    for name in extra:
+        difference = first_difference(stored.get(name), fresh.get(name), name)
         checks.append(
             {
-                "name": f"constraint:{identifier}",
-                "ok": False,
-                "expected": recorded[identifier],
-                "measured": "not_evaluated",
-                "describes": "a constraint in the certificate was not re-checked",
+                "name": name,
+                "ok": difference is None,
+                "describes": "an unrecognised certificate field is unchanged",
+                **({"difference": difference} if difference else {}),
             }
         )
-
-    status = overall_status(reports)
     return VerifyResult(
         ok=all(check["ok"] for check in checks),
         checks=checks,
-        status=status,
-        reports=reports,
+        status=str(fresh.get("status", "unknown")),
+        reports=[],
     )
-
-
-def _check(name: str, expected: Any, measured: Any, describes: str) -> Dict[str, Any]:
-    return {
-        "name": name,
-        "ok": expected == measured,
-        "expected": expected,
-        "measured": measured,
-        "describes": describes,
-    }

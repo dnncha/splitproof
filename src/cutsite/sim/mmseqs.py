@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from ..errors import BackendUnavailable
 from . import (
     DEFAULT_MAX_PAIRS,
     HEURISTIC,
@@ -19,6 +20,37 @@ from . import (
 
 COVERAGE_DEFAULT = 0.8
 SENSITIVITY_DEFAULT = 7.5
+EVALUE_DEFAULT = 0.001
+COV_MODE_DEFAULT = 0
+
+
+def _run(command, backend: str):
+    import subprocess as _subprocess
+
+    from ..errors import CutsiteError
+
+    try:
+        return _subprocess.run(command, capture_output=True, text=True, check=True)
+    except FileNotFoundError as exc:
+        raise BackendUnavailable(
+            f"could not run {command[0]!r}",
+            remedy="Install MMseqs2 and make sure 'mmseqs' is on PATH.",
+            details={"backend": backend},
+        ) from exc
+    except _subprocess.CalledProcessError as exc:
+        tail = (exc.stderr or exc.stdout or "").strip().splitlines()
+        raise CutsiteError(
+            f"MMseqs2 exited with status {exc.returncode}",
+            remedy=(
+                "Check the sequences are valid protein or nucleotide records, and that the "
+                "constraint's coverage and sensitivity parameters are sensible."
+            ),
+            details={
+                "backend": backend,
+                "returncode": exc.returncode,
+                "stderr": tail[-5:] if tail else [],
+            },
+        ) from exc
 
 
 def _collect(backend: str, threshold: float, max_pairs: int, triples) -> PairSet:
@@ -61,10 +93,19 @@ class MMseqs2Identity(SimilarityBackend):
     metric = "identity"
     exactness = HEURISTIC
 
-    def __init__(self, binary: str = "mmseqs", coverage: float = COVERAGE_DEFAULT, sensitivity: float = SENSITIVITY_DEFAULT):
+    def __init__(
+        self,
+        binary: str = "mmseqs",
+        coverage: float = COVERAGE_DEFAULT,
+        sensitivity: float = SENSITIVITY_DEFAULT,
+        evalue: float = EVALUE_DEFAULT,
+        cov_mode: int = COV_MODE_DEFAULT,
+    ):
         self.binary = binary
         self.coverage = coverage
         self.sensitivity = sensitivity
+        self.evalue = evalue
+        self.cov_mode = cov_mode
 
     def executable(self) -> Optional[str]:
         return shutil.which(self.binary)
@@ -103,7 +144,9 @@ class MMseqs2Identity(SimilarityBackend):
             "-c",
             f"{self.coverage:g}",
             "--cov-mode",
-            "0",
+            str(self.cov_mode),
+            "-e",
+            f"{self.evalue:g}",
             "-s",
             f"{self.sensitivity:g}",
             "--max-seqs",
@@ -132,8 +175,8 @@ class MMseqs2Identity(SimilarityBackend):
         present = [i for i, value in enumerate(values) if value]
         missing = [i for i, value in enumerate(values) if not value]
         notes = [
-            "MMseqs2 is a sensitive but heuristic search, so the measured maximum identity is not a "
-            "proof of absence; raise --mmseqs-sensitivity for a stricter search",
+            "MMseqs2 is a sensitive but heuristic search, so a clean result is evidence and not "
+            "proof of absence; raise the constraint's 'sensitivity' parameter for a stricter search",
         ]
         if missing:
             notes.append(f"{len(missing)} entities have no sequence and are treated as unrelated")
@@ -144,12 +187,7 @@ class MMseqs2Identity(SimilarityBackend):
                 fasta = root / "seqs.fasta"
                 out = root / "hits.tsv"
                 self._write_fasta(fasta, values, present)
-                subprocess.run(
-                    self.command(fasta, fasta, out, root / "tmp", threshold),
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                )
+                _run(self.command(fasta, fasta, out, root / "tmp", threshold), self.name)
                 id_to_index = {f"s{i}": i for i in present}
                 triples = parse_search_tsv(out.read_text(encoding="utf-8"), id_to_index)
         return SimilarityResult(
@@ -161,7 +199,12 @@ class MMseqs2Identity(SimilarityBackend):
             pairs=_collect(self.name, threshold, max_pairs, triples),
             missing=missing,
             notes=notes,
-            params={"coverage": self.coverage, "sensitivity": self.sensitivity, "cov_mode": 0},
+            params={
+                "coverage": self.coverage,
+                "sensitivity": self.sensitivity,
+                "cov_mode": self.cov_mode,
+                "evalue": self.evalue,
+            },
         )
 
     def nearest(
@@ -181,12 +224,7 @@ class MMseqs2Identity(SimilarityBackend):
             query_fasta, target_fasta, hits = root / "q.fasta", root / "t.fasta", root / "hits.tsv"
             self._write_fasta(query_fasta, values, query_list)
             self._write_fasta(target_fasta, values, target_list)
-            subprocess.run(
-                self.command(query_fasta, target_fasta, hits, root / "tmp", 0.0),
-                capture_output=True,
-                text=True,
-                check=True,
-            )
+            _run(self.command(query_fasta, target_fasta, hits, root / "tmp", 0.0), self.name)
             id_to_index = {f"s{i}": i for i in set(query_list) | set(target_list)}
             target_set = set(target_list)
             for line in hits.read_text(encoding="utf-8").splitlines():

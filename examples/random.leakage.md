@@ -12,8 +12,8 @@
 
 | fold | entities | target | drift | units |
 | --- | --- | --- | --- | --- |
-| test | 74 | 74 | +0.0% | 0 |
-| train | 166 | 166 | +0.0% | 0 |
+| test | 74 | 48 | +54.2% | 6 |
+| train | 166 | 192 | -13.5% | 6 |
 
 ## Constraints
 
@@ -23,9 +23,12 @@ no pair above kmer_jaccard 0.4 on 'sequence' may cross folds — **VIOLATED**
 
 - backend: exact_jaccard
 - cross_fold_pairs_at_or_above_threshold: 217
+- cross_fold_pairs_by_fold_pair: {'test|train': 217}
 - exactness: exact
 - max_cross_fold_similarity: 0.87013
 - pairs_at_or_above_threshold: 500
+- values_absent: 0
+- values_unparsable: 0
 
 Worst offenders:
 
@@ -75,8 +78,8 @@ Reference fold: `train`
 - held-out items compared: 74
 - nearest reference similarity: {'min': 0.325153, 'p50': 0.630189, 'p90': 0.721116, 'p99': 0.792531, 'max': 0.87013, 'mean': 0.620862}
 - at or above the declared threshold: 73
-- nearest-neighbour baseline: spearman=0.881475 over 74 items
-- a nearest-neighbour copy of the reference fold scores this much; a model that does not clearly beat it has learned nothing beyond similarity
+- nearest-neighbour baseline: spearman=0.881424 over 74 items
+- what a nearest-neighbour copy of the reference fold scores. Similarity reasoning is a legitimate model, so this is neither a floor nor a ceiling: a model that does not clearly beat it has not shown it learned anything beyond similarity, and beating it is not on its own evidence that the split is sound
 
 ## What this does and does not prove
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as _dt
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .errors import PolicyError
 
@@ -149,12 +149,19 @@ class SimilarityConstraint:
     metric: str
     threshold: float
     backend: Optional[str] = None
+    params: Tuple[Tuple[str, Any], ...] = ()
     kind: str = "similarity"
+
+    @property
+    def settings(self) -> Dict[str, Any]:
+        return dict(self.params)
 
     def to_dict(self) -> Dict[str, Any]:
         out = {"kind": "similarity", "key": self.key, "metric": self.metric, "threshold": self.threshold}
         if self.backend:
             out["backend"] = self.backend
+        if self.params:
+            out["params"] = dict(sorted(self.params))
         return out
 
     def describe(self) -> str:
@@ -194,8 +201,8 @@ class TemporalConstraint:
 
     def describe(self) -> str:
         return (
-            f"'{self.key}' before {self.cutoff.isoformat()} goes to '{self.before}', "
-            f"on or after goes to '{self.after}'"
+            f"nothing dated on or after {self.cutoff.isoformat()} by '{self.key}' may appear "
+            f"in '{self.before}'"
         )
 
 
@@ -367,6 +374,7 @@ class Policy:
                 remedy="Add at least one similarity, disjoint or temporal constraint.",
             )
         seed = _as_int(raw.get("seed", 7), "policy.seed")
+        _check_temporal_fits_scheme(constraints, scheme)
         return Policy(
             version=version,
             dataset=dataset,
@@ -399,6 +407,33 @@ def _parse_structured(text: str, path: Path) -> Dict[str, Any]:
     if loaded is None:
         raise PolicyError(f"policy file {path} is empty")
     return loaded
+
+
+def _check_temporal_fits_scheme(constraints: List[Constraint], scheme: Scheme) -> None:
+    temporal = [c for c in constraints if isinstance(c, TemporalConstraint)]
+    if not temporal:
+        return
+    if scheme.kind != "holdout":
+        raise PolicyError(
+            f"a temporal constraint needs named folds, so it cannot be used with the "
+            f"'{scheme.kind}' scheme",
+            remedy=(
+                "Use scheme.kind: holdout with named fractions, so the constraint has a 'before' "
+                "fold and an 'after' fold to talk about. Under kfold or leave-unit-out the fold "
+                "names are generated, and a temporal constraint there would check nothing."
+            ),
+            details={"scheme": scheme.kind},
+        )
+    names = set(scheme.fold_names)
+    for constraint in temporal:
+        for role, side in (("before", constraint.before), ("after", constraint.after)):
+            if side not in names:
+                raise PolicyError(
+                    f"the temporal constraint's '{role}' names fold '{side}', which the scheme "
+                    f"does not define",
+                    remedy=f"Scheme folds are {sorted(names)}. Rename, or add that fraction.",
+                    details={"role": role, "fold": side, "available": sorted(names)},
+                )
 
 
 def _parse_constraints(raw: Any, dataset: DatasetSpec) -> List[Constraint]:
@@ -459,7 +494,23 @@ def _parse_similarity(item: Dict[str, Any], where: str, dataset: DatasetSpec) ->
             details={"where": where, "value": threshold},
         )
     backend = _as_text(item["backend"], f"{where}.backend") if item.get("backend") else None
-    return SimilarityConstraint(key=key, metric=metric, threshold=threshold, backend=backend)
+    params_raw = _as_mapping(item.get("params") or {}, f"{where}.params")
+    params: Dict[str, Any] = {}
+    for name, value in params_raw.items():
+        label = _as_text(name, f"{where}.params")
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            raise PolicyError(
+                f"{where}.params.{label} must be a number or a name, got {type(value).__name__}",
+                details={"where": f"{where}.params.{label}"},
+            )
+        params[label] = value
+    return SimilarityConstraint(
+        key=key,
+        metric=metric,
+        threshold=threshold,
+        backend=backend,
+        params=tuple(sorted(params.items())),
+    )
 
 
 def _parse_temporal(item: Dict[str, Any], where: str, dataset: DatasetSpec) -> TemporalConstraint:

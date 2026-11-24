@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .dataset import Dataset
+from .digest import digest
 from .errors import PolicyError, VacuousConstraint
 from .policy import Policy, SimilarityConstraint
 from .sim import DEFAULT_MAX_PAIRS, EXACTNESS_RANK, SimilarityResult, resolve
@@ -40,6 +41,7 @@ class UnionFind:
 class Unit:
     key: int
     members: List[int]
+    signature: str = ""
     label_counts: Dict[str, int] = field(default_factory=dict)
     pinned: Optional[str] = None
     reasons: List[str] = field(default_factory=list)
@@ -111,6 +113,24 @@ NUMERIC_BUCKETS = 4
 MISSING_CLASS = "__missing__"
 
 
+def label_kind(policy: Policy, values: Sequence[Optional[str]]) -> str:
+    """Whether a label should be treated as numeric or categorical.
+
+    One rule, shared by stratification and by the baseline metric, so the two can
+    never disagree about what a label is.
+    """
+    if policy.dataset.label_kind != "auto":
+        return policy.dataset.label_kind
+    present = [value for value in values if value is not None]
+    if not present:
+        return "categorical"
+    try:
+        numbers = [float(value) for value in present]
+    except ValueError:
+        return "categorical"
+    return "numeric" if len(set(numbers)) > NUMERIC_BUCKETS * 2 else "categorical"
+
+
 def label_classes(policy: Policy, data: Dataset) -> Tuple[Optional[List[str]], str]:
     """Stratification classes per entity, and a word for how they were derived.
 
@@ -123,13 +143,7 @@ def label_classes(policy: Policy, data: Dataset) -> Tuple[Optional[List[str]], s
         return None, "none"
     values = data.column(policy.dataset.label_column)
     present = [value for value in values if value is not None]
-    kind = policy.dataset.label_kind
-    if kind == "auto":
-        try:
-            numbers = [float(value) for value in present]
-            kind = "numeric" if len(set(numbers)) > NUMERIC_BUCKETS * 2 else "categorical"
-        except ValueError:
-            kind = "categorical"
+    kind = label_kind(policy, values)
     if kind == "numeric":
         numeric = [float(value) for value in present]
         if not numeric:
@@ -149,6 +163,11 @@ def label_classes(policy: Policy, data: Dataset) -> Tuple[Optional[List[str]], s
     if distinct > MAX_STRATIFY_CLASSES:
         return None, f"skipped, {distinct} classes is more than {MAX_STRATIFY_CLASSES}"
     return [value if value is not None else MISSING_CLASS for value in values], "categorical"
+
+
+def _signature(data: Dataset, members: Sequence[int]) -> str:
+    """A content key for a unit, so a split does not depend on row order."""
+    return digest(sorted(data.ids[index] for index in members))
 
 
 def _constraint_id(constraint: SimilarityConstraint) -> str:
@@ -178,6 +197,7 @@ def build(
             size,
             requested=requested,
             exact_max_n=exact_max_n,
+            settings=constraint.settings,
         )
         result = backend.pairs_above(
             values, key.kind, constraint.threshold, max_pairs=max_pairs
@@ -239,7 +259,15 @@ def build(
             for member in kept:
                 bucket = label_values[member] if label_values[member] is not None else "__missing__"
                 counts[bucket] = counts.get(bucket, 0) + 1
-        units.append(Unit(key=root, members=kept, label_counts=counts, pinned=pins.get(root)))
+        units.append(
+            Unit(
+                key=root,
+                members=kept,
+                signature=_signature(data, kept),
+                label_counts=counts,
+                pinned=pins.get(root),
+            )
+        )
 
     return UnitGraph(
         units=units,

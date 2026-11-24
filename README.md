@@ -101,14 +101,44 @@ Every split writes a `cutsite.cert.json`: small, diffable, and safe to commit.
 }
 ```
 
-`cutsite verify` recomputes the data digest, the assignment digest, and every constraint
-measurement, then exits non-zero if anything moved. Put it in CI and your split stops
-being a claim in a methods section.
+`cutsite verify` rebuilds the whole certificate from the data and the fold column and
+compares it field by field: the digests, every constraint's measured values, the unit
+structure, the backends and their parameters, and the leakage diagnostics. A certificate
+whose numbers were edited by hand does not verify, and the failure names the exact path:
+
+```
+FAIL constraints: every constraint re-measures to exactly the recorded values
+       constraints[0].measured.max_cross_fold_similarity: certificate says 0.0, recomputed None
+```
+
+Exit codes: `0` verified, `1` a declared constraint is genuinely violated, `2`
+verification itself failed. Put it in CI and your split stops being a claim in a methods
+section.
 
 The certificate is a reproducibility anchor, not a cryptographic signature. It detects
 drift — edited data, a swapped assignment, a changed policy — and it lets a third party
 re-derive the measurements themselves. It does not attest to who produced it. Sign the
 file with your own key if you need that.
+
+## What the status word does not mean
+
+`cutsite` fails only on constraints you declared, which means **a lax policy gets a clean
+status**. Declare k-mer Jaccard at 0.95 on a set of close homologs and you will be told
+`proven`, truthfully, because no pair at 0.95 crosses folds.
+
+This is deliberate: a tool that invented its own identity cutoff would be asserting an
+opinion your field has not agreed on. But it means the status word alone is not a quality
+claim, so cutsite prints the number that contradicts it on the very next line:
+
+```
+Constraint status: proven.
+Worst held-out similarity to the reference fold: 0.87013 on sequence:kmer_jaccard@0.95
+  (74 of 74 held-out items have any neighbour).
+That status covers only the constraints the policy declared. Read the numbers below
+  before treating this split as hard.
+```
+
+Quote the status and the worst similarity together, or neither.
 
 ## Honesty rules
 
@@ -165,9 +195,11 @@ split that silently buries the problem.
 
 - **Nearest-neighbour similarity distribution** for every held-out item against the
   reference fold — median, p99, max. The shape of your actual generalisation gap.
-- **The nearest-neighbour baseline.** A 1-NN model that just copies its most similar
-  training neighbour's label. If your transformer scores 0.86 and this scores 0.85, the
-  model learned nothing beyond similarity. This number belongs in every paper and is in
+- **The similarity baseline.** A 1-NN model that just copies its most similar training
+  neighbour's label. Similarity reasoning is a legitimate model, especially in chemistry,
+  so this is neither a floor nor a ceiling: a model that does not clearly beat it has not
+  shown it learned anything beyond similarity, and beating it is not on its own evidence
+  that the split is sound. This number belongs next to every reported score and is in
   almost none.
 - **Unit structure.** How many independent units exist, and what fraction of your data
   sits in the largest one. Most people have never looked, and are surprised.
@@ -184,8 +216,10 @@ $ cutsite audit proteins.yaml --split-column fold_random
 Constraint status: VIOLATED.
 - no pair above kmer_jaccard 0.4 on 'sequence' may cross folds: VIOLATED.
 - no value of 'donor_id' may appear in more than one fold: VIOLATED.
-Nearest-neighbour baseline on sequence:kmer_jaccard@0.4: spearman=0.881424 over 74
-  held-out items. Beat this or the model learned nothing.
+Worst held-out similarity to the reference fold: 0.87013 (74 of 74 held-out items have
+  any neighbour).
+Similarity baseline on sequence:kmer_jaccard@0.4: spearman=0.881424 over 74 held-out
+  items. Report any model score next to this one.
 Held-out items' nearest reference similarity: median 0.630189, p99 0.792531, max 0.87013.
 ```
 
@@ -198,19 +232,24 @@ The same data, split by `cutsite`:
 
 ```
 $ cutsite split proteins.yaml
-240 entities in 6 independent units; folds: test=36, train=204.
+240 entities in 6 independent units; folds: test=42, train=198.
 Constraint status: proven.
-Nearest-neighbour baseline: spearman=0.020119 over 23 held-out items.
-Held-out items' nearest reference similarity: median 0.00232, p99 0.004651, max 0.004651.
+Worst held-out similarity to the reference fold: 0.00232 (31 of 42 held-out items have
+  any neighbour).
+Similarity baseline: spearman=-0.00264 over 31 held-out items.
 ```
 
-The baseline collapses from 0.88 to 0.02. That gap is how much of the original score was
-leakage.
+The baseline collapses from 0.88 to −0.003, and the worst held-out similarity falls from
+0.87 to 0.002. That gap is how much of the original score was leakage.
 
-Note the baseline's denominator: 23 of the 36 held-out items, because only those share
-any k-mer with the training fold at all. The other 13 have no nearest neighbour to copy,
+Note the baseline's denominator: 31 of the 42 held-out items, because only those share
+any k-mer with the training fold at all. The other 11 have no nearest neighbour to copy,
 which is the point of the split. `with_a_neighbour` in the JSON always reports that
 coverage, so the baseline is never quoted without it.
+
+The example data is synthetic and built to make the point: 40 homologous families with
+near-constant labels, and six donor groups that collapse them into six units. It
+demonstrates the mechanism; it is not evidence about any real dataset.
 
 Note the fold sizes: 36/204, not the requested 48/192. Six donor groups across 240 rows
 means only six independent units exist, so the achievable fractions are coarse.
@@ -228,6 +267,7 @@ Constraint status: VIOLATED.
 
 ```json
 "cross_fold_pairs_at_or_above_threshold": 248,
+"cross_fold_pairs_by_fold_pair": {"test|train": 248},
 "max_cross_fold_similarity": 0.986,
 "nearest_reference_similarity": {"min": 0.877, "p50": 0.954, "max": 0.986},
 "nearest_neighbour_baseline": {"metric": "spearman", "value": 0.880675, "compared": 74}
