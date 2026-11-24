@@ -13,6 +13,7 @@ Scheduled: none yet (see Holes)
 | inner | Unit and integration tests | `pytest -q` | inner, gate | 9 s | honest |
 | inner | Backend budget conformance | `pytest -q tests/test_net.py` | inner, gate | 1 s | honest, parametrised over the backend registry |
 | inner | Policy parser properties | `pytest -q tests/test_policy_properties.py` | inner, gate | 4 s | honest, Hypothesis, 300 examples per property |
+| inner | Data loader fuzz | `pytest -q tests/test_dataset_properties.py` | inner, gate | 3 s | honest, Hypothesis, 250 examples per property |
 | gate | End-to-end split, verify, audit | `scripts/gate.sh` | gate, CI | 3 s | honest |
 | gate | Python matrix (3.10, 3.12, 3.13) | GitHub Actions `test` | gate (push, PR) | 1 min | honest |
 | gate | MMseqs2 identity path, really executed | GitHub Actions `identity` | gate (push, PR) | 2 min | honest |
@@ -30,7 +31,7 @@ Scheduled: none yet (see Holes)
 | MMseqs2 backend (identity metric) | `src/cutsite/sim/mmseqs.py` | med × high | `tests/test_identity.py` against the real binary, in CI and locally | covered |
 | RDKit backends (tanimoto, scaffold) | `src/cutsite/sim/chem.py` | med × med | `tests/test_chem.py` against real RDKit, in CI and locally | covered |
 | Fold allocation quality (starved folds, ignored fractions) | `src/cutsite/assign.py` | med × high | `tests/test_assign.py` | covered |
-| Data loading (CSV/TSV/FASTA/Parquet) | `src/cutsite/dataset.py` | med × med | duplicate-id and bad-date tests | late: no fuzz over malformed files |
+| Data loading (CSV/TSV/FASTA/Parquet) | `src/cutsite/dataset.py` | med × med | duplicate-id and bad-date tests, plus Hypothesis fuzz over arbitrary CSV, TSV and FASTA bytes | covered |
 
 ## Holes, ranked
 
