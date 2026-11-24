@@ -42,6 +42,9 @@ def test_tools_list_exposes_every_handler():
     for tool in responses[0]["result"]["tools"]:
         assert tool["description"]
         assert tool["inputSchema"]["type"] == "object"
+        assert "annotations" in tool
+        for prop in tool["inputSchema"]["properties"].values():
+            assert prop.get("description")
 
 
 def test_unknown_method_returns_a_json_rpc_error():

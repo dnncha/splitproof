@@ -80,19 +80,32 @@ def _emit_error(error: SplitproofError, args: argparse.Namespace) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="splitproof",
-        description="Build, audit and prove leakage-free train/test splits for biological data.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Build, audit, and re-verify leakage-free train/test splits for biological and "
+            "chemical data."
+        ),
+        epilog=(
+            "Exit codes:\n"
+            "  0  clean (split built, audit passed, or certificate verified)\n"
+            "  1  declared constraint violated (or --require-exact failed on an unproven result)\n"
+            "  2  usage, data, policy, or verification failure\n"
+            "  3  infeasible split (for example GIANT_UNIT or fewer units than folds)\n"
+            "\n"
+            "Pass --json on any command for machine-readable output with a summary field."
+        ),
     )
     parser.add_argument("--version", action="version", version=f"splitproof {__version__}")
-    subparsers = parser.add_subparsers(dest="command")
+    subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
 
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="emit machine-readable JSON on stdout")
-    common.add_argument("--data", type=Path, default=None, help="data file, overriding dataset.path")
+    common.add_argument("--data", type=Path, default=None, help="dataset file, overriding dataset.path in the policy")
     common.add_argument(
         "--exact-max-n",
         type=int,
         default=api.DEFAULT_EXACT_MAX_N,
-        help="above this many entities, fall back to approximate similarity search",
+        help="above this many entities, switch kmer_jaccard from exact sparse to MinHash LSH (default: %(default)s)",
     )
     common.add_argument(
         "--backend",
@@ -104,78 +117,115 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument(
         "--no-neighbours",
         action="store_true",
-        help="skip the nearest-neighbour diagnostics (faster, less informative)",
+        help="skip nearest-neighbour similarity and 1-NN baseline diagnostics (faster, less informative)",
     )
     common.add_argument(
         "--max-pairs",
         type=int,
         default=None,
-        help="refuse rather than exhaust memory when a threshold relates this many pairs",
+        help="refuse with TOO_MANY_PAIRS rather than exhaust memory when related pairs exceed this limit",
     )
     common.add_argument(
         "--require-exact",
         action="store_true",
-        help="fail unless every constraint was proven by an exhaustive backend, not merely unviolated",
+        help="exit 1 unless every constraint is proven exhaustively ('satisfied'), rejecting 'satisfied_unproven'",
     )
 
     split = subparsers.add_parser(
-        "split", parents=[common], help="build a split and write a certificate proving it"
+        "split",
+        parents=[common],
+        help="build a split honouring a policy and write its certificate",
+        description=(
+            "Build a deterministic split from a policy, measure achieved separation and 1-NN "
+            "baseline diagnostics, and write a verifiable certificate."
+        ),
     )
-    split.add_argument("policy", type=Path)
-    split.add_argument("--out", type=Path, default=Path("split.csv"), help="where to write id,fold")
-    split.add_argument("--cert", type=Path, default=Path("splitproof.cert.json"))
-    split.add_argument("--report", type=Path, default=None, help="also write a Markdown report here")
+    split.add_argument("policy", type=Path, help="path to the splitproof YAML or JSON policy file")
+    split.add_argument("--out", type=Path, default=Path("split.csv"), help="output path for id,fold assignments (default: %(default)s)")
+    split.add_argument("--cert", type=Path, default=Path("splitproof.cert.json"), help="output path for the certificate JSON (default: %(default)s)")
+    split.add_argument("--report", type=Path, default=None, help="also write a Markdown report to this path")
     split.add_argument(
         "--tolerance",
         type=float,
         default=api.DEFAULT_TOLERANCE,
         help=(
-            "how far the largest unit may exceed a fold's requested size before the split is "
-            "refused as infeasible; final fold drift is reported, never refused"
+            "how far the largest unit may exceed a fold's target size before failing with "
+            "GIANT_UNIT (default: %(default)s); final fold drift is always reported"
         ),
     )
     split.set_defaults(handler=_cmd_split)
 
     audit = subparsers.add_parser(
-        "audit", parents=[common], help="measure leakage in a split somebody else made"
+        "audit",
+        parents=[common],
+        help="measure leakage and 1-NN baseline in an existing split",
+        description=(
+            "Audit an existing split against a policy, reporting crossing pairs, nearest-neighbour "
+            "similarity percentiles, and the 1-NN similarity baseline."
+        ),
     )
-    audit.add_argument("policy", type=Path)
-    audit.add_argument("--split-column", default=None, help="column in the data file holding the fold")
-    audit.add_argument("--split", type=Path, default=None, help="two-column id,fold file")
-    audit.add_argument("--cert", type=Path, default=None, help="write the measurements as a certificate")
-    audit.add_argument("--report", type=Path, default=None, help="write a Markdown report here")
+    audit.add_argument("policy", type=Path, help="path to the splitproof YAML or JSON policy file")
+    audit.add_argument("--split-column", default=None, help="column in the dataset file holding fold assignments")
+    audit.add_argument("--split", type=Path, default=None, help="two-column id,fold CSV or TSV file")
+    audit.add_argument("--cert", type=Path, default=None, help="write the audit measurements as a certificate JSON")
+    audit.add_argument("--report", type=Path, default=None, help="write a Markdown leakage report to this path")
     audit.set_defaults(handler=_cmd_audit)
 
     verify = subparsers.add_parser(
-        "verify", parents=[common], help="re-prove a certificate against data and a split"
+        "verify",
+        parents=[common],
+        help="re-prove a certificate from scratch against data and split",
+        description=(
+            "Recompute digests, unit structure, constraint measurements, and diagnostics from "
+            "the data and split, and compare field by field against the certificate."
+        ),
     )
-    verify.add_argument("cert", type=Path)
-    verify.add_argument("--split", type=Path, default=None)
-    verify.add_argument("--split-column", default=None)
+    verify.add_argument("cert", type=Path, help="path to the splitproof certificate JSON file")
+    verify.add_argument("--split", type=Path, default=None, help="two-column id,fold file to verify")
+    verify.add_argument("--split-column", default=None, help="column in the dataset file holding fold assignments")
     verify.set_defaults(handler=_cmd_verify)
 
     units = subparsers.add_parser(
-        "units", parents=[common], help="inspect the independent units a policy implies"
+        "units",
+        parents=[common],
+        help="inspect the independent units a policy implies without splitting",
+        description=(
+            "Compute connected components implied by a policy's constraints and report unit count, "
+            "largest unit fraction, and size percentiles."
+        ),
     )
-    units.add_argument("policy", type=Path)
+    units.add_argument("policy", type=Path, help="path to the splitproof YAML or JSON policy file")
     units.set_defaults(handler=_cmd_units)
 
-    init = subparsers.add_parser("init", help="write a starter policy by inspecting a data file")
-    init.add_argument("data", type=Path)
-    init.add_argument("--out", type=Path, default=Path("policy.yaml"))
-    init.add_argument("--id", default=None, help="id column, if splitproof should not guess")
-    init.add_argument("--json", action="store_true")
+    init = subparsers.add_parser(
+        "init",
+        help="write a starter policy by inspecting a dataset file",
+        description=(
+            "Inspect a CSV, TSV, FASTA, or Parquet file and write a starter policy YAML. "
+            "Review and edit the guessed columns and constraints before running split."
+        ),
+    )
+    init.add_argument("data", type=Path, help="dataset file to inspect (.csv, .tsv, .fasta, or .parquet)")
+    init.add_argument("--out", type=Path, default=Path("policy.yaml"), help="output policy path (default: %(default)s)")
+    init.add_argument("--id", default=None, help="explicit entity id column, skipping header guessing")
+    init.add_argument("--json", action="store_true", help="emit machine-readable JSON on stdout")
     init.set_defaults(handler=_cmd_init)
 
     mcp = subparsers.add_parser(
-        "mcp", help="serve splitproof to an AI agent as an MCP server over stdio"
+        "mcp",
+        help="run the stdio MCP server for AI agents",
+        description="Serve splitproof tools over JSON-RPC stdio using the Model Context Protocol.",
     )
     mcp.set_defaults(handler=_cmd_mcp)
 
-    explain = subparsers.add_parser("explain", help="print a certificate in plain language")
-    explain.add_argument("cert", type=Path)
-    explain.add_argument("--markdown", action="store_true")
-    explain.add_argument("--json", action="store_true")
+    explain = subparsers.add_parser(
+        "explain",
+        help="render an existing certificate as plain text or Markdown",
+        description="Print a human-readable summary or Markdown report of an existing certificate without recomputing.",
+    )
+    explain.add_argument("cert", type=Path, help="path to an existing splitproof certificate JSON file")
+    explain.add_argument("--markdown", action="store_true", help="output the full Markdown report")
+    explain.add_argument("--json", action="store_true", help="emit machine-readable JSON on stdout")
     explain.set_defaults(handler=_cmd_explain)
 
     return parser

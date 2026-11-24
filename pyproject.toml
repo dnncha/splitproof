@@ -5,26 +5,41 @@ build-backend = "hatchling.build"
 [project]
 name = "splitproof"
 version = "0.1.0"
-description = "Build, audit and prove leakage-free train/test splits for biological data."
+description = "Build, audit, and re-verify leakage-free train/test splits for biological and chemical data."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
+authors = [
+  { name = "Donncha O'Toole", email = "dnncha@gmail.com" },
+]
 keywords = [
   "machine learning",
   "benchmark",
   "data leakage",
+  "train-test-split",
   "cross-validation",
   "bioinformatics",
+  "cheminformatics",
   "computational biology",
+  "proteins",
+  "small molecules",
   "reproducibility",
+  "mcp",
+  "model-context-protocol",
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",
+  "Environment :: Console",
   "Intended Audience :: Science/Research",
   "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3",
-  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Topic :: Scientific/Engineering :: Chemistry",
 ]
 dependencies = ["numpy>=1.22", "scipy>=1.8", "PyYAML>=6.0"]
 
@@ -37,8 +52,11 @@ dev = ["pytest>=7.4", "hypothesis>=6.100", "ruff==0.8.6", "mypy==2.4.1", "types-
 splitproof = "splitproof.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/dnncha/splitproof"
+Homepage = "https://dnncha.github.io/splitproof/"
+Repository = "https://github.com/dnncha/splitproof"
+Documentation = "https://github.com/dnncha/splitproof#readme"
 Issues = "https://github.com/dnncha/splitproof/issues"
+Changelog = "https://github.com/dnncha/splitproof/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/splitproof"]

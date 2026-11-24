@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+title: splitproof
+message: "If you use splitproof to build, audit, or verify dataset splits in published work, please cite it using this metadata."
+type: software
+authors:
+  - family-names: "O'Toole"
+    given-names: Donncha
+version: 0.1.0
+date-released: "2026-11-24"
+license: Apache-2.0
+repository-code: https://github.com/dnncha/splitproof
+url: https://dnncha.github.io/splitproof/
+abstract: >-
+  splitproof builds, audits, and re-verifies leakage-free train/test splits for
+  biological and chemical datasets. Users declare similarity, disjoint-group,
+  and temporal constraints in a policy file; splitproof builds connected
+  components into independent units, allocates them deterministically to folds,
+  measures nearest-neighbour leakage diagnostics and a 1-NN similarity baseline,
+  and emits a JSON certificate that anyone can recompute from scratch.
+keywords:
+  - data leakage
+  - train-test split
+  - biological machine learning
+  - bioinformatics
+  - cheminformatics
+  - benchmarking
+  - reproducibility

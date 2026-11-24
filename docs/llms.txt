@@ -1,0 +1,56 @@
+# splitproof
+
+> Build, audit, and re-verify leakage-free train/test splits for biological and chemical data. Emit a certificate that anyone can recompute from scratch, from the CLI or over stdio MCP.
+
+splitproof is a Python CLI and MCP server for ML researchers in computational biology and chemistry, benchmark maintainers, and coding agents. You declare what must not cross folds (sequence identity, k-mer Jaccard, molecular Tanimoto, ring systems, canonical SMILES, exact duplicates, disjoint donor/patient/plate/site groups, or temporal cutoffs). splitproof builds connected components (independent units), allocates units to folds deterministically under a seed, measures nearest-neighbour leakage diagnostics and a 1-NN similarity baseline, and writes `splitproof.cert.json`. `splitproof verify` recomputes digests, units, constraint measurements, and diagnostics from scratch against the data and split.
+
+## Key measured findings (2026-11-24, `docs/real-data.md`)
+
+- Random 80/20 splits leaked on all six audited MoleculeNet datasets (BACE, BBBP, ClinTox, ESOL, Lipophilicity, HIV): 55 exact duplicate compounds and 2,455 Tanimoto >= 0.8 pairs crossed train/test on HIV; 1 duplicate compound, 491 Tanimoto >= 0.8 pairs, and 3,774 shared ring-system pairs crossed on BACE.
+- BACE's official `Model` split puts the same compound in both train and test: `BACE_72` (train, neutral) and `BACE_669` (test, protonated at the guanidine), caught by RDKit charge neutralisation.
+- Across all 20,429 reviewed human proteins in UniProt (Swiss-Prot), MMseqs2 sequence identity (>= 0.3, coverage 0.8) found 137,696 related pairs (46,874 crossing a random 80/20 split), which is 33x the 4,126 related pairs found by k-mer Jaccard (k=5, >= 0.3).
+
+## Commands and exit codes
+
+- `splitproof init <data>`: Inspect CSV, TSV, FASTA, or Parquet and write a starter `policy.yaml`. Review before running `split`.
+- `splitproof units <policy>`: Compute independent units and `largest_unit_fraction` without building a split.
+- `splitproof split <policy>`: Build a deterministic split (`split.csv`) and certificate (`splitproof.cert.json`).
+- `splitproof audit <policy> (--split-column COL | --split FILE)`: Measure leakage, crossing pairs, and 1-NN baseline in an existing split.
+- `splitproof verify <cert> (--split FILE | --split-column COL)`: Recompute and compare every certificate section field by field.
+- `splitproof explain <cert> [--markdown]`: Print a certificate summary without recomputing.
+- `splitproof mcp`: Serve `splitproof_init`, `splitproof_split`, `splitproof_audit`, `splitproof_verify`, `splitproof_units`, and `splitproof_explain` over JSON-RPC stdio.
+
+Exit codes: `0` clean, `1` declared constraint violated (or `--require-exact` failed on `satisfied_unproven`), `2` usage/data/policy/verification error, `3` infeasible split (e.g. `GIANT_UNIT`). Every command accepts `--json`.
+
+## Backends and exactness
+
+- `identity` (MMseqs2, requires `mmseqs` on PATH): `heuristic` -> clean status is `satisfied_unproven`
+- `kmer_jaccard` (exact sparse up to `--exact-max-n`, default 20,000): `exact` -> clean status is `satisfied`
+- `kmer_jaccard` (MinHash LSH above `--exact-max-n`): `lower_bound` -> clean status is `satisfied_unproven`
+- `tanimoto` (RDKit Morgan fingerprints, `splitproof[chem]`): `exact` -> `satisfied`
+- `ring_systems` (canonical ring-system set over RDKit, `splitproof[chem]`): `exact` -> `satisfied`
+- `canonical_smiles` (RDKit desalted, neutralised canonical SMILES, `splitproof[chem]`): `exact` -> `satisfied`
+- `exact_duplicate` (normalised equality, core install): `exact` -> `satisfied`
+
+## Honesty boundaries and non-claims
+
+- "proven" (`satisfied`) means an exhaustive backend compared every pair on the constraints declared in the policy, with zero absent or unparsable rows on those keys. It makes no claim about undeclared constraints or threshold choice.
+- k-mer Jaccard is never called sequence identity.
+- Not implemented in 0.1.0: 3D structural similarity (Foldseek/pocket), 2D or bipartite interaction splits (drug-target, PPI, TCR-pMHC), in-memory DataFrame API, and automatic bridge-entity dropping.
+
+## Documentation
+
+- [README](https://github.com/dnncha/splitproof/blob/main/README.md): Overview, quickstart, real-data proof, policy schema, certificate verification, and agent configs
+- [Agent Skill](https://github.com/dnncha/splitproof/blob/main/agent/SKILL.md): Complete operating instructions for coding agents using splitproof CLI or MCP
+- [Real-Data Benchmark Audit](https://github.com/dnncha/splitproof/blob/main/docs/real-data.md): Full tables and methodology for MoleculeNet and UniProt human protein audits
+- [Security Policy](https://github.com/dnncha/splitproof/blob/main/SECURITY.md): Threat model for verifying untrusted certificates and running MCP tools
+- [MCP Server Card](https://github.com/dnncha/splitproof/blob/main/server.json): Official MCP Registry manifest for `io.github.dnncha/splitproof`
+- [Changelog](https://github.com/dnncha/splitproof/blob/main/CHANGELOG.md): Release history
+- [Project Website](https://dnncha.github.io/splitproof/): Landing page with quickstart, benchmark tables, and FAQ
+- [Feedback Net](https://github.com/dnncha/splitproof/blob/main/NET.md): Quality signals, known holes, and escape log
+
+## Optional
+
+- [Example Policy (k-mer Jaccard)](https://github.com/dnncha/splitproof/blob/main/examples/proteins.yaml): Starter protein policy runnable with core install
+- [Example Policy (MMseqs2 identity)](https://github.com/dnncha/splitproof/blob/main/examples/proteins-identity.yaml): Protein policy using real sequence identity
+- [Citation Metadata](https://github.com/dnncha/splitproof/blob/main/CITATION.cff): CFF citation metadata for academic papers

@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>splitproof: Leakage-Free Train/Test Splits for Biological and Chemical Data</title>
+  <meta name="description" content="Build, audit, and re-verify leakage-free train/test splits for proteins, small molecules, cells, and patient cohorts. Deterministic Python CLI and stdio MCP server with verifiable JSON certificates.">
+  <link rel="canonical" href="https://dnncha.github.io/splitproof/">
+  <link rel="alternate" type="text/plain" href="https://dnncha.github.io/splitproof/llms.txt" title="LLM Context">
+  <meta property="og:title" content="splitproof: Leakage-Free Train/Test Splits for Biological and Chemical Data">
+  <meta property="og:description" content="Declare what must not cross folds. Build deterministic splits, audit existing benchmarks, and recompute certificates from scratch via CLI or stdio MCP.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://dnncha.github.io/splitproof/">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="splitproof: Leakage-Free Splits for Biological Data">
+  <meta name="twitter:description" content="Build, audit, and re-verify leakage-free train/test splits for proteins, molecules, cells, and patients. CLI + stdio MCP server.">
+  <style>
+    :root {
+      --bg: #ffffff;
+      --fg: #111827;
+      --muted: #4b5563;
+      --surface: #f8fafc;
+      --border: #e5e7eb;
+      --code-bg: #f3f4f6;
+      --accent: #0f766e;
+      --accent-hover: #115e59;
+      --warn-bg: #fef3c7;
+      --warn-fg: #92400e;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b0f14;
+        --fg: #f3f4f6;
+        --muted: #9ca3af;
+        --surface: #131922;
+        --border: #263040;
+        --code-bg: #161d27;
+        --accent: #2dd4bf;
+        --accent-hover: #5eead4;
+        --warn-bg: #2e2412;
+        --warn-fg: #fcd34d;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.6;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-hover); text-decoration: underline; }
+    .wrap {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 0 20px;
+    }
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 16px 0;
+    }
+    nav {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .brand {
+      font-family: var(--mono);
+      font-weight: 700;
+      font-size: 1.1rem;
+      color: var(--fg);
+    }
+    .nav-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      font-size: 0.92rem;
+    }
+    main { padding: 40px 0 64px; }
+    section { margin-top: 48px; }
+    section:first-child { margin-top: 0; }
+    h1 {
+      font-size: clamp(1.8rem, 4vw, 2.5rem);
+      line-height: 1.18;
+      margin: 0 0 14px;
+      letter-spacing: -0.02em;
+    }
+    h2 {
+      font-size: 1.45rem;
+      line-height: 1.25;
+      margin: 0 0 12px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    h3 {
+      font-size: 1.05rem;
+      margin: 22px 0 8px;
+    }
+    p { margin: 0 0 14px; }
+    .lead {
+      font-size: 1.12rem;
+      color: var(--muted);
+      max-width: 72ch;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin: 20px 0 24px;
+    }
+    .btn {
+      display: inline-block;
+      padding: 9px 16px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      border: 1px solid var(--border);
+      color: var(--fg);
+      background: var(--surface);
+    }
+    .btn.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #041210;
+    }
+    .btn:hover { text-decoration: none; opacity: 0.92; }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      font-family: var(--mono);
+      font-size: 0.88rem;
+      line-height: 1.5;
+      margin: 12px 0 16px;
+    }
+    code {
+      font-family: var(--mono);
+      font-size: 0.88em;
+      background: var(--code-bg);
+      padding: 2px 5px;
+      border-radius: 4px;
+    }
+    pre code { background: none; padding: 0; font-size: inherit; }
+    .findings {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin: 18px 0 22px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .card .stat {
+      font-family: var(--mono);
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .card p { margin: 0; font-size: 0.93rem; color: var(--muted); }
+    .table-wrap { overflow-x: auto; margin: 14px 0 18px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    th { font-weight: 600; background: var(--surface); }
+    .num { font-family: var(--mono); text-align: right; white-space: nowrap; }
+    .callout {
+      background: var(--surface);
+      border-left: 3px solid var(--accent);
+      padding: 12px 16px;
+      border-radius: 0 6px 6px 0;
+      margin: 16px 0;
+      font-size: 0.95rem;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+    }
+    ul { padding-left: 20px; margin: 0 0 14px; }
+    li { margin-bottom: 6px; }
+    dl { margin: 0; }
+    dt { font-weight: 600; margin-top: 16px; }
+    dd { margin: 6px 0 0 0; color: var(--muted); }
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 24px 0 40px;
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+    .footer-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-bottom: 10px;
+    }
+  </style>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "splitproof",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Linux, macOS, Windows",
+        "softwareVersion": "0.1.0",
+        "description": "Build, audit, and re-verify leakage-free train/test splits for biological and chemical datasets, with verifiable JSON certificates and a stdio MCP server.",
+        "url": "https://dnncha.github.io/splitproof/",
+        "codeRepository": "https://github.com/dnncha/splitproof",
+        "license": "https://www.apache.org/licenses/LICENSE-2.0",
+        "programmingLanguage": "Python",
+        "dateModified": "2026-11-24",
+        "author": {
+          "@type": "Person",
+          "name": "Donncha O'Toole"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What does a proven status in splitproof actually guarantee?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "A proven (satisfied) status means an exhaustive backend compared every pair on the constraints declared in the policy, with zero absent or unparsable values on those keys, and zero violations crossed folds. It makes no claim about constraints you did not declare or whether your chosen threshold is strict enough for your field."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Why does splitproof separate k-mer Jaccard from sequence identity?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "k-mer Jaccard is a fast exact metric over k-mer sets, whereas sequence identity measures aligned homology. Across all 20,429 reviewed human proteins in UniProt, MMseqs2 sequence identity (>= 0.3, coverage 0.8) found 137,696 related pairs compared with 4,126 for k-mer Jaccard (k=5, >= 0.3), a 33x gap. splitproof therefore never labels k-mer Jaccard as identity."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What does splitproof verify check?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "splitproof verify rebuilds the entire certificate from scratch from the dataset and fold assignments and compares every section field by field: policy digest, dataset digest, assignment digest, unit structure, backend parameters, per-constraint measured counts, and nearest-neighbour diagnostics. Editing any number causes verification to fail and report the exact field path."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How does splitproof handle untrusted certificates?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Backends accept only allowlisted numeric parameters from policies so a certificate cannot pick an executable path. During verify, recorded dataset paths outside the working directory are refused unless --data is passed explicitly, and MCP output paths are confined to the current working directory. Certificates are integrity anchors rather than cryptographic signatures."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What is not implemented in splitproof 0.1.0?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "splitproof 0.1.0 does not yet implement 3D structural similarity (such as Foldseek or pocket metrics), 2D or bipartite splits for interaction datasets, an in-memory DataFrame API, or opt-in bridge-entity dropping to split giant single-linkage components."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <nav aria-label="Primary">
+        <a class="brand" href="#top">splitproof</a>
+        <div class="nav-links">
+          <a href="#quickstart">Quickstart</a>
+          <a href="#proof">Real-Data Proof</a>
+          <a href="#how">How It Works</a>
+          <a href="#agents">Agents &amp; MCP</a>
+          <a href="#backends">Backends</a>
+          <a href="#faq">FAQ</a>
+          <a href="https://github.com/dnncha/splitproof">GitHub</a>
+        </div>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top" class="wrap">
+    <section>
+      <h1>Leakage-free train/test splits for biological data, with certificates anyone can re-verify</h1>
+      <p class="lead">
+        Build, audit, and re-verify splits for proteins, nucleic acids, small molecules, cells, and patient cohorts.
+        Built for ML researchers in computational biology and chemistry, benchmark maintainers, and coding agents.
+      </p>
+      <div class="actions">
+        <a class="btn primary" href="https://github.com/dnncha/splitproof">View on GitHub</a>
+        <a class="btn" href="https://github.com/dnncha/splitproof/blob/main/docs/real-data.md">Read real-data audit</a>
+        <a class="btn" href="https://github.com/dnncha/splitproof/blob/main/agent/SKILL.md">Agent SKILL.md</a>
+      </div>
+
+      <h2 id="quickstart">Three-command quickstart</h2>
+      <p>Clone, install in Python 3.10+, build a certified split on the bundled example, and re-verify every number from scratch:</p>
+      <pre><code>git clone https://github.com/dnncha/splitproof.git &amp;&amp; cd splitproof &amp;&amp; pip install .
+splitproof split examples/proteins.yaml
+splitproof verify splitproof.cert.json --split split.csv</code></pre>
+      <p>
+        Audit the random split column in that same file with
+        <code>splitproof audit examples/proteins.yaml --split-column fold_random</code>.
+        On your own CSV, TSV, FASTA, or Parquet dataset, run <code>splitproof init data.csv</code> to draft a starter
+        <code>policy.yaml</code>, review the constraints, then run <code>splitproof split policy.yaml</code>.
+      </p>
+    </section>
+
+    <section id="proof">
+      <h2>Measured on public benchmarks</h2>
+      <p>
+        Audited on 24 November 2026 across six MoleculeNet datasets and every reviewed human protein in UniProt
+        (<a href="https://github.com/dnncha/splitproof/blob/main/docs/real-data.md">full report</a>,
+        reproducible via <code>scripts/realdata.py</code>).
+      </p>
+      <div class="findings">
+        <div class="card">
+          <div class="stat">6 of 6</div>
+          <p>Random 80/20 splits on six MoleculeNet sets (BACE, BBBP, ClinTox, ESOL, Lipophilicity, HIV) leak Tanimoto &ge; 0.8 pairs across train and test; five of six leak exact duplicate compounds.</p>
+        </div>
+        <div class="card">
+          <div class="stat">BACE_72 / BACE_669</div>
+          <p>BACE's official <code>Model</code> split puts the same compound in both train (neutral) and test (protonated at the guanidine). Raw SMILES comparison misses it; charge neutralisation catches it.</p>
+        </div>
+        <div class="card">
+          <div class="stat">33x</div>
+          <p>Across all 20,429 reviewed human proteins in UniProt, MMseqs2 identity (&ge; 0.3, coverage 0.8) finds 137,696 related pairs compared with 4,126 for k-mer Jaccard (k=5, &ge; 0.3).</p>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Benchmark</th>
+              <th class="num">Rows</th>
+              <th>Constraint audited</th>
+              <th class="num">Related pairs</th>
+              <th class="num">Crossing train/test</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>BACE (random 80/20)</td><td class="num">1,513</td><td>Tanimoto &ge; 0.8</td><td class="num">1,624</td><td class="num">491</td></tr>
+            <tr><td>BACE (random 80/20)</td><td class="num">1,513</td><td>same ring systems</td><td class="num">11,565</td><td class="num">3,774</td></tr>
+            <tr><td>BACE (official <code>Model</code>)</td><td class="num">1,513</td><td>same compound (neutralised)</td><td class="num">1</td><td class="num">1</td></tr>
+            <tr><td>BBBP (random 80/20)</td><td class="num">2,050</td><td>same compound / Tanimoto &ge; 0.8</td><td class="num">78 / 251</td><td class="num">25 / 64</td></tr>
+            <tr><td>ClinTox (random 80/20)</td><td class="num">1,484</td><td>same compound / Tanimoto &ge; 0.8</td><td class="num">61 / 169</td><td class="num">17 / 48</td></tr>
+            <tr><td>ESOL (random 80/20)</td><td class="num">1,128</td><td>same compound / Tanimoto &ge; 0.8</td><td class="num">11 / 224</td><td class="num">3 / 79</td></tr>
+            <tr><td>Lipophilicity (random 80/20)</td><td class="num">4,200</td><td>same compound / Tanimoto &ge; 0.8</td><td class="num">0 / 1,217</td><td class="num">0 / 411</td></tr>
+            <tr><td>HIV (random 80/20)</td><td class="num">41,127</td><td>same compound / Tanimoto &ge; 0.8</td><td class="num">197 / 7,455</td><td class="num">55 / 2,455</td></tr>
+            <tr><td>UniProt human (random 80/20)</td><td class="num">20,429</td><td>k-mer Jaccard &ge; 0.3 (k=5)</td><td class="num">4,126</td><td class="num">1,316</td></tr>
+            <tr><td>UniProt human (random 80/20)</td><td class="num">20,429</td><td>MMseqs2 identity &ge; 0.3, cov 0.8</td><td class="num">137,696</td><td class="num">46,874</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="how">
+      <h2>How it works</h2>
+      <p>
+        Declare your leakage rules in YAML or JSON: similarity constraints (sequence identity, k-mer Jaccard, Tanimoto,
+        ring systems, canonical SMILES, exact duplicates), disjoint groups (donor, patient, plate, site), and
+        one-directional temporal cutoffs.
+      </p>
+      <p>
+        <code>splitproof</code> builds single-linkage connected components across all declared similarity edges and shared
+        groups to form atomic independent units, then assigns those units to folds with a deterministic, row-order-invariant,
+        quantile-stratified allocator under <code>seed</code>. Every split writes <code>splitproof.cert.json</code>, and
+        <code>splitproof verify</code> recomputes every digest, unit statistic, constraint measurement, and diagnostic from
+        scratch.
+      </p>
+
+      <div class="callout">
+        <strong>Honesty rules:</strong> <code>splitproof</code> invents no thresholds of its own, separates exhaustive
+        proof (<code>satisfied</code>) from heuristic or approximate evidence (<code>satisfied_unproven</code>), refuses
+        vacuous constraints (<code>CONSTRAINT_VACUOUS</code>) and impossible homology blobs (<code>GIANT_UNIT</code>),
+        and never calls k-mer Jaccard sequence identity.
+      </div>
+
+      <h3>Diagnostics emitted on every split and audit</h3>
+      <ul>
+        <li><strong>Nearest-neighbour similarity distribution:</strong> min, median, p90, p99, and max similarity from held-out rows to the reference fold.</li>
+        <li><strong>1-NN similarity baseline:</strong> score from copying the closest training neighbour's label, with exact neighbour coverage. Report it beside every model metric.</li>
+        <li><strong>Independent unit structure:</strong> unit count and <code>largest_unit_fraction</code>, showing your real effective sample size.</li>
+      </ul>
+    </section>
+
+    <section id="agents">
+      <h2>Built for coding agents and MCP</h2>
+      <p>
+        Every CLI command supports <code>--json</code>, deterministic exit codes (<code>0</code> clean, <code>1</code>
+        violated or <code>--require-exact</code> failure, <code>2</code> usage/data/verify error, <code>3</code>
+        infeasible split), and structured error objects with a <code>remedy</code> field.
+        <code>splitproof mcp</code> exposes the same six operations over stdio with working-directory write confinement:
+        <code>splitproof_init</code>, <code>splitproof_units</code>, <code>splitproof_split</code>,
+        <code>splitproof_audit</code>, <code>splitproof_verify</code>, and <code>splitproof_explain</code>.
+      </p>
+
+      <div class="grid-2">
+        <div>
+          <h3>Claude Code</h3>
+          <pre><code>claude mcp add splitproof -- splitproof mcp</code></pre>
+          <h3>Cursor (<code>.cursor/mcp.json</code>)</h3>
+          <pre><code>{
+  "mcpServers": {
+    "splitproof": {
+      "command": "splitproof",
+      "args": ["mcp"]
+    }
+  }
+}</code></pre>
+        </div>
+        <div>
+          <h3>Codex (<code>~/.codex/config.toml</code>)</h3>
+          <pre><code>[mcp_servers.splitproof]
+command = "splitproof"
+args = ["mcp"]</code></pre>
+          <h3>Agent discovery files</h3>
+          <ul>
+            <li><a href="https://github.com/dnncha/splitproof/blob/main/agent/SKILL.md">agent/SKILL.md</a> (operating rules)</li>
+            <li><a href="llms.txt">llms.txt</a> (machine-readable index)</li>
+            <li><a href="https://github.com/dnncha/splitproof/blob/main/server.json">server.json</a> (MCP Registry manifest)</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="backends">
+      <h2>Backends and current limits</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Metric</th>
+              <th>Backend</th>
+              <th>Install</th>
+              <th>Exactness</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>identity</code></td><td>MMseqs2</td><td><code>mmseqs</code> on <code>PATH</code></td><td><code>heuristic</code></td></tr>
+            <tr><td><code>kmer_jaccard</code></td><td>exact sparse Jaccard (n &le; 20,000)</td><td>core install</td><td><code>exact</code></td></tr>
+            <tr><td><code>kmer_jaccard</code></td><td>MinHash LSH (n &gt; 20,000)</td><td>core install</td><td><code>lower_bound</code></td></tr>
+            <tr><td><code>tanimoto</code></td><td>RDKit Morgan fingerprints (desalted, neutralised)</td><td><code>splitproof[chem]</code></td><td><code>exact</code></td></tr>
+            <tr><td><code>ring_systems</code></td><td>canonical ring-system set over RDKit</td><td><code>splitproof[chem]</code></td><td><code>exact</code></td></tr>
+            <tr><td><code>canonical_smiles</code></td><td>RDKit canonical SMILES (desalted, neutralised)</td><td><code>splitproof[chem]</code></td><td><code>exact</code></td></tr>
+            <tr><td><code>exact_duplicate</code></td><td>normalised equality</td><td>core install</td><td><code>exact</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Reads CSV, TSV, FASTA, and Parquet (<code>splitproof[parquet]</code>). Only empty or whitespace-only cells are
+        missing; literal strings like <code>NA</code>, <code>None</code>, and <code>Null</code> stay valid group names.
+      </p>
+      <h3>Not implemented in 0.1.0</h3>
+      <ul>
+        <li>3D structural similarity (Foldseek or pocket similarity)</li>
+        <li>2D or bipartite splits for interaction datasets (drug-target, PPI, TCR-pMHC)</li>
+        <li>In-memory pandas, Polars, or AnnData DataFrame API</li>
+        <li>Opt-in bridge-entity dropping (<code>--max-drop</code>) for breaking giant single-linkage components</li>
+      </ul>
+    </section>
+
+    <section id="faq">
+      <h2>Frequently asked questions</h2>
+      <dl>
+        <dt>What does a proven status in splitproof actually guarantee?</dt>
+        <dd>A proven (<code>satisfied</code>) status means an exhaustive backend compared every pair on the constraints declared in the policy, with zero absent or unparsable values on those keys, and zero violations crossed folds. It makes no claim about constraints you did not declare or whether your chosen threshold is strict enough for your field.</dd>
+
+        <dt>Why does splitproof separate k-mer Jaccard from sequence identity?</dt>
+        <dd>k-mer Jaccard is a fast exact metric over k-mer sets, whereas sequence identity measures aligned homology. Across all 20,429 reviewed human proteins in UniProt, MMseqs2 sequence identity (&ge; 0.3, coverage 0.8) found 137,696 related pairs compared with 4,126 for k-mer Jaccard (k=5, &ge; 0.3), a 33x gap. splitproof therefore never labels k-mer Jaccard as identity.</dd>
+
+        <dt>What does splitproof verify check?</dt>
+        <dd><code>splitproof verify</code> rebuilds the entire certificate from scratch from the dataset and fold assignments and compares every section field by field: policy digest, dataset digest, assignment digest, unit structure, backend parameters, per-constraint measured counts, and nearest-neighbour diagnostics. Editing any number causes verification to fail and report the exact field path.</dd>
+
+        <dt>How does splitproof handle untrusted certificates?</dt>
+        <dd>Backends accept only allowlisted numeric parameters from policies so a certificate cannot pick an executable path. During <code>verify</code>, recorded dataset paths outside the working directory are refused unless <code>--data</code> is passed explicitly, and MCP output paths are confined to the current working directory. Certificates are integrity anchors rather than cryptographic signatures.</dd>
+
+        <dt>What is not implemented in splitproof 0.1.0?</dt>
+        <dd>splitproof 0.1.0 does not yet implement 3D structural similarity (such as Foldseek or pocket metrics), 2D or bipartite splits for interaction datasets, an in-memory DataFrame API, or opt-in bridge-entity dropping to split giant single-linkage components.</dd>
+      </dl>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <div class="footer-links">
+        <a href="https://github.com/dnncha/splitproof">GitHub</a>
+        <a href="llms.txt">llms.txt</a>
+        <a href="https://github.com/dnncha/splitproof/blob/main/agent/SKILL.md">SKILL.md</a>
+        <a href="https://github.com/dnncha/splitproof/blob/main/SECURITY.md">Security</a>
+        <a href="https://github.com/dnncha/splitproof/blob/main/CITATION.cff">Citation</a>
+        <a href="https://github.com/dnncha/splitproof/blob/main/CHANGELOG.md">Changelog</a>
+        <a href="https://github.com/dnncha/splitproof/blob/main/LICENSE">Apache-2.0</a>
+      </div>
+      <div>splitproof v0.1.0 &middot; Last updated: 24 November 2026</div>
+    </div>
+  </footer>
+</body>
+</html>
