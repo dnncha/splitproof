@@ -208,12 +208,13 @@ def _crossing_classes(
                 amount = folds[left] * folds[right]
                 key = "|".join(sorted((left, right)))
                 by_pair[key] = by_pair.get(key, 0) + amount
-                if len(examples) < MAX_EXAMPLES:
-                    examples.append(
-                        (witness[label][left], witness[label][right], 1.0)
-                    )
+                first_member, second_member = sorted(
+                    (witness[label][left], witness[label][right]), key=lambda i: data.ids[i]
+                )
+                examples.append((first_member, second_member, 1.0))
+    examples.sort(key=lambda example: (data.ids[example[0]], data.ids[example[1]]))
     worst = 1.0 if crossing else None
-    return total, crossing, worst, examples, dict(sorted(by_pair.items()))
+    return total, crossing, worst, examples[:MAX_EXAMPLES], dict(sorted(by_pair.items()))
 
 
 def _crossing(

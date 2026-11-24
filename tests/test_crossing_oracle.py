@@ -53,6 +53,9 @@ def test_class_crossings_match_brute_force_enumeration(case):
     assert worst == (1.0 if crossing else None)
     assert len(examples) <= evaluate.MAX_EXAMPLES
     assert bool(examples) == bool(crossing)
+    named = [(ids[left], ids[right]) for left, right, _ in examples]
+    assert all(a < b for a, b in named), named
+    assert named == sorted(named)
     for left, right, similarity in examples:
         assert similarity == 1.0
         assert labels[left] == labels[right]

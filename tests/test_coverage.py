@@ -121,3 +121,53 @@ def test_verify_refuses_a_certificate_that_drops_rows_the_policy_does_not(tmp_pa
     with pytest.raises(DataError) as error:
         api.verify(tmp_path / "forged.json", split_column="fold", skip_neighbours=True)
     assert error.value.details["dropped_without_cause"] == ["r5"]
+
+
+def _identical_pairs_dataset(tmp_path):
+    rows = [
+        ("a1", "MKVLAAGIVG", "train"),
+        ("a2", "MKVLAAGIVG", "test"),
+        ("b1", "PQRSTWYPQR", "train"),
+        ("b2", "PQRSTWYPQR", "train"),
+        ("c1", "DEFGHIKLMN", "test"),
+        ("blank", "", "train"),
+        ("d1", "WWYYWWYYWW", "test"),
+        ("d2", "WWYYWWYYWW", "train"),
+    ]
+    path = tmp_path / "pairs.csv"
+    with path.open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["id", "sequence", "fold"])
+        writer.writerows(rows)
+    return path
+
+
+@pytest.mark.parametrize("metric,threshold", [("exact_duplicate", 1.0), ("kmer_jaccard", 1.0)])
+def test_a_similarity_audit_measures_exactly_what_it_should(tmp_path, metric, threshold):
+    path = _identical_pairs_dataset(tmp_path)
+    policy = Policy.from_dict(
+        {
+            "splitproof": 1,
+            "dataset": {"path": str(path), "id": "id", "similarity": {"s": {"column": "sequence", "kind": "protein"}}},
+            "scheme": {"kind": "holdout", "fractions": {"train": 0.5, "test": 0.5}},
+            "constraints": [{"kind": "similarity", "key": "s", "metric": metric, "threshold": threshold}],
+            "seed": 1,
+        }
+    )
+    outcome = api.audit(policy, split_column="fold", skip_neighbours=True)
+    [report] = outcome.reports
+    assert report.status == VIOLATED
+    measured = report.measured
+    assert measured["pairs_at_or_above_threshold"] == 3
+    assert measured["cross_fold_pairs_at_or_above_threshold"] == 2
+    assert measured["cross_fold_pairs_by_fold_pair"] == {"test|train": 2}
+    assert measured["max_cross_fold_similarity"] == 1.0
+    assert measured["values_absent"] == 1
+    assert measured["values_unparsable"] == 0
+    assert measured["exactness"] == "exact"
+    assert measured["backend"] == metric if metric == "exact_duplicate" else measured["backend"]
+    assert [(e["a"], e["b"], e["a_fold"], e["b_fold"], e["similarity"]) for e in report.examples] == [
+        ("a1", "a2", "train", "test", 1.0),
+        ("d1", "d2", "test", "train", 1.0),
+    ]
+    assert report.coverage == Coverage(violations=2, exhaustive=True, bound=7, unbound=1)
