@@ -3,7 +3,7 @@ from __future__ import annotations
 from itertools import combinations
 from types import SimpleNamespace
 
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from splitproof import evaluate
@@ -162,3 +162,33 @@ def test_temporal_check_matches_brute_force(case, cutoff):
     assert [example["id"] for example in report.examples] == wrong[: evaluate.MAX_EXAMPLES]
     assert all(example["fold"] == "train" for example in report.examples)
     assert bool(report.notes) == (not wrong and len(dated) < len(live))
+
+
+@settings(max_examples=400, deadline=None)
+@given(
+    folds=st.lists(st.sampled_from(["train", "test", "", "__dropped__", "__unassigned__"]), min_size=1, max_size=40),
+    allow_dropped=st.booleans(),
+)
+@example(folds=["train", "test"] + ["__unassigned__"] * 12, allow_dropped=False)
+def test_audit_fold_check_refuses_exactly_the_ungradable_splits(folds, allow_dropped):
+    from splitproof.assign import UNASSIGNED, check_audit_folds
+    from splitproof.errors import DataError
+
+    ids = [f"e{i:02d}" for i in range(len(folds))]
+    data = Dataset(ids=ids, columns={"id": ids})
+    named = {fold for fold in folds if fold != DROPPED}
+    should_refuse = (
+        UNASSIGNED in folds
+        or (DROPPED in folds and not allow_dropped)
+        or "" in named
+        or len(named) < 2
+    )
+    try:
+        check_audit_folds(data, dict(enumerate(folds)), "column 'fold'", allow_dropped=allow_dropped)
+    except DataError as error:
+        assert should_refuse, (folds, allow_dropped, error.message)
+        if UNASSIGNED in folds:
+            blank = sorted(ids[i] for i, fold in enumerate(folds) if fold == UNASSIGNED)
+            assert error.details == {"missing": len(blank), "examples": blank[:10]}
+        return
+    assert not should_refuse, (folds, allow_dropped)
