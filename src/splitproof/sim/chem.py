@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 from typing import Any, ClassVar, Dict, Mapping, List, Optional, Sequence, Tuple
 
 from ..errors import BackendFailed
@@ -22,6 +23,7 @@ _HINT = (
 )
 
 
+@functools.lru_cache(maxsize=1)
 def _standardisers():
     from rdkit.Chem import SaltRemover
     from rdkit.Chem.MolStandardize import rdMolStandardize

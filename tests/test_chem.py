@@ -359,3 +359,23 @@ def test_different_inorganic_salts_are_not_merged():
     assert groups is not None
     assert len({groups[0], groups[1], groups[2]}) == 3
     assert groups[0] == groups[3]
+
+
+def test_the_salt_dictionary_is_parsed_once_however_many_molecules(monkeypatch):
+    pytest.importorskip("rdkit")
+    from rdkit.Chem import SaltRemover
+
+    from splitproof.sim import chem
+    from splitproof.sim.chem import CanonicalSmiles
+
+    built = []
+    original = SaltRemover.SaltRemover.__init__
+
+    def counting(self, *args, **kwargs):
+        built.append(1)
+        original(self, *args, **kwargs)
+
+    getattr(chem._standardisers, "cache_clear", lambda: None)()
+    monkeypatch.setattr(SaltRemover.SaltRemover, "__init__", counting)
+    CanonicalSmiles().pairs_above(["CCO", "CCN.Cl", "c1ccccc1"] * 50, "molecule", 1.0)
+    assert len(built) == 1
