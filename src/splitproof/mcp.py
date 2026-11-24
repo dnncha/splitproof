@@ -13,12 +13,18 @@ from .policy import Policy
 
 FALLBACK_PROTOCOL = "2025-06-18"
 
-STRING = {"type": "string"}
-BOOLEAN = {"type": "boolean"}
-NUMBER = {"type": "number"}
+def _prop(kind: str, description: str) -> Dict[str, str]:
+    return {"type": kind, "description": description}
 
 
-def _tool(name: str, description: str, properties: Dict[str, Any], required: List[str]) -> Dict[str, Any]:
+def _tool(
+    name: str,
+    description: str,
+    properties: Dict[str, Any],
+    required: List[str],
+    *,
+    read_only: bool = False,
+) -> Dict[str, Any]:
     return {
         "name": name,
         "description": description,
@@ -28,82 +34,107 @@ def _tool(name: str, description: str, properties: Dict[str, Any], required: Lis
             "required": required,
             "additionalProperties": False,
         },
+        "annotations": {
+            "readOnlyHint": read_only,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
     }
 
 
 TOOLS: List[Dict[str, Any]] = [
     _tool(
         "splitproof_init",
-        "Inspect a data file and write a starter splitproof policy, guessing the id column, "
-        "similarity keys, group columns and date columns. A guess is not a policy: read it "
-        "and correct it before trusting a split built from it.",
-        {"data": STRING, "out": STRING, "id_column": STRING},
+        "Inspect a CSV, TSV, FASTA, or Parquet file and write a starter splitproof policy YAML, "
+        "guessing the id column, similarity keys, group columns, and date columns. A guess is "
+        "not a policy: read and edit the generated file before building a split. Sequence "
+        "constraints default to metric 'identity', which needs MMseqs2 on PATH.",
+        {
+            "data": _prop("string", "Path to the input dataset (.csv, .tsv, .fasta, or .parquet)."),
+            "out": _prop("string", "Output policy path inside the working directory (default: policy.yaml)."),
+            "id_column": _prop("string", "Explicit entity id column name, skipping header guessing."),
+        },
         ["data"],
     ),
     _tool(
         "splitproof_split",
-        "Build a leakage-free split from a policy and write a certificate proving it. Returns "
-        "the fold sizes, the per-constraint status, the unit structure and the leakage "
-        "diagnostics. A 'satisfied' status means every pair at or above the declared threshold "
-        "was compared and none crosses folds; 'satisfied_unproven' means the backend is "
-        "heuristic so absence is evidence, not proof.",
+        "Build a deterministic train/test or k-fold split from a policy and write a verifiable "
+        "certificate. Returns fold sizes, independent unit statistics, per-constraint status, "
+        "and leakage diagnostics. Status 'satisfied' means an exhaustive check passed on the "
+        "declared constraints; 'satisfied_unproven' means a heuristic/approximate backend ran "
+        "or some rows had no usable key value (evidence, not proof). Set require_exact=true to "
+        "fail unless every constraint is 'satisfied'. Output paths must stay inside the working directory.",
         {
-            "policy": STRING,
-            "data": STRING,
-            "out": STRING,
-            "cert": STRING,
-            "report": STRING,
-            "tolerance": NUMBER,
-            "require_exact": BOOLEAN,
-            "skip_neighbours": BOOLEAN,
+            "policy": _prop("string", "Path to the splitproof YAML or JSON policy file."),
+            "data": _prop("string", "Optional dataset path overriding dataset.path in the policy."),
+            "out": _prop("string", "Output path for the id,fold split file inside the working directory (default: split.csv)."),
+            "cert": _prop("string", "Output path for the certificate JSON inside the working directory (default: splitproof.cert.json)."),
+            "report": _prop("string", "Optional output path for a Markdown report inside the working directory."),
+            "tolerance": _prop("number", "How far the largest unit may exceed a fold's target size before failing with GIANT_UNIT (default: 0.1)."),
+            "require_exact": _prop("boolean", "Fail (ok=false) unless every constraint status is 'satisfied' rather than 'satisfied_unproven'."),
+            "skip_neighbours": _prop("boolean", "Skip nearest-neighbour similarity and 1-NN baseline diagnostics for faster runs."),
         },
         ["policy"],
     ),
     _tool(
         "splitproof_audit",
-        "Measure leakage in a split that already exists, such as a published benchmark's "
-        "train/test column. Returns the crossing pairs ranked by similarity, the "
-        "nearest-neighbour similarity distribution, and the nearest-neighbour baseline score "
-        "that any real model must beat.",
+        "Measure leakage in an existing split, such as a published benchmark's fold column or "
+        "a two-column id,fold file. Returns per-constraint status, crossing pairs ranked by "
+        "similarity, nearest-neighbour similarity percentiles, and a 1-NN similarity baseline "
+        "to report beside any model score (a model that does not beat it has not shown it "
+        "learned beyond similarity). Pass either split_column or split.",
         {
-            "policy": STRING,
-            "data": STRING,
-            "split_column": STRING,
-            "split": STRING,
-            "cert": STRING,
-            "report": STRING,
-            "skip_neighbours": BOOLEAN,
+            "policy": _prop("string", "Path to the splitproof YAML or JSON policy file."),
+            "data": _prop("string", "Optional dataset path overriding dataset.path in the policy."),
+            "split_column": _prop("string", "Column name inside the dataset file containing fold assignments."),
+            "split": _prop("string", "Path to a two-column id,fold CSV or TSV file."),
+            "cert": _prop("string", "Optional output path inside the working directory to save the audit certificate JSON."),
+            "report": _prop("string", "Optional output path inside the working directory to write a Markdown leakage report."),
+            "skip_neighbours": _prop("boolean", "Skip nearest-neighbour similarity and 1-NN baseline diagnostics for faster runs."),
         },
         ["policy"],
     ),
     _tool(
         "splitproof_verify",
-        "Re-prove a certificate against the data and the split. Recomputes the data digest, the "
-        "assignment digest and every constraint measurement, and reports which checks failed. "
-        "Use this to confirm a split has not drifted since it was certified.",
+        "Re-prove a splitproof certificate from scratch against the data and split assignment. "
+        "Recomputes digests, independent units, every constraint measurement, and leakage "
+        "diagnostics, failing on any drift or manual edit. Certificates are treated as untrusted "
+        "input: pass data explicitly if the dataset is outside the working directory.",
         {
-            "cert": STRING,
-            "data": STRING,
-            "split": STRING,
-            "split_column": STRING,
-            "require_exact": BOOLEAN,
-            "skip_neighbours": BOOLEAN,
+            "cert": _prop("string", "Path to the splitproof certificate JSON file to verify."),
+            "data": _prop("string", "Optional dataset path; required if the certificate's recorded path is outside the working directory."),
+            "split": _prop("string", "Path to the two-column id,fold split file to verify."),
+            "split_column": _prop("string", "Column name inside the dataset file containing fold assignments."),
+            "require_exact": _prop("boolean", "Fail (ok=false) unless every constraint is proven exhaustively ('satisfied')."),
+            "skip_neighbours": _prop("boolean", "Skip nearest-neighbour diagnostics during recomputation (must match how the certificate was built)."),
         },
         ["cert"],
+        read_only=True,
     ),
     _tool(
         "splitproof_units",
-        "Report the independent units a policy implies, without building a split: how many "
-        "units exist, how large the biggest one is, and what fraction of the data it holds. "
-        "Use this first when a split is refused as infeasible.",
-        {"policy": STRING, "data": STRING},
+        "Inspect the independent connected-component units a policy implies without building a "
+        "split. Returns total unit count, largest unit size, largest_unit_fraction, and size "
+        "percentiles. Call this first to check effective sample size or when splitproof_split "
+        "fails with GIANT_UNIT or SPLIT_INFEASIBLE.",
+        {
+            "policy": _prop("string", "Path to the splitproof YAML or JSON policy file."),
+            "data": _prop("string", "Optional dataset path overriding dataset.path in the policy."),
+        },
         ["policy"],
+        read_only=True,
     ),
     _tool(
         "splitproof_explain",
-        "Summarise an existing certificate in plain language, or as Markdown.",
-        {"cert": STRING, "markdown": BOOLEAN},
+        "Format an existing splitproof certificate as plain text or Markdown without "
+        "recomputing from the dataset. Use splitproof_verify to re-prove a certificate.",
+        {
+            "cert": _prop("string", "Path to an existing splitproof certificate JSON file."),
+            "markdown": _prop("boolean", "Return a full Markdown report instead of a plain-text summary."),
+        },
         ["cert"],
+        read_only=True,
     ),
 ]
 
@@ -348,11 +379,18 @@ def handle(message: Any) -> Optional[Dict[str, Any]]:
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "splitproof", "version": __version__},
                 "instructions": (
-                    "splitproof builds, audits and proves leakage-free train/test splits for "
-                    "biological data. Start with splitproof_init on a data file, correct the "
-                    "guessed policy, then splitproof_split. Audit any split you did not build "
-                    "yourself with splitproof_audit and treat its nearest-neighbour baseline as "
-                    "the score a model must beat."
+                    "splitproof builds, audits, and re-verifies leakage-free train/test splits for "
+                    "biological and chemical datasets. Workflow: start with splitproof_init on a "
+                    "data file, review and correct the guessed policy, optionally inspect "
+                    "splitproof_units to check effective sample size, then run splitproof_split. "
+                    "Use splitproof_audit on any existing or published split before trusting "
+                    "benchmark numbers, and report nearest_neighbour_baseline beside any model "
+                    "score. Always check per-constraint status: 'satisfied' means an exhaustive "
+                    "check passed on the declared constraints; 'satisfied_unproven' means a "
+                    "heuristic or approximate backend ran or some rows were unconstrained "
+                    "(evidence, not proof; pass require_exact=true to fail on unproven results); "
+                    "'violated' lists the worst crossing pairs. Never call kmer_jaccard sequence "
+                    "identity. Use splitproof_verify to re-derive a certificate from scratch."
                 ),
             },
         )

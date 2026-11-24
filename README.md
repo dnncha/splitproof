@@ -1,40 +1,55 @@
 # splitproof
 
-**Leakage-free train/test splits for biological data — built, audited, and provable.**
+<!-- mcp-name: io.github.dnncha/splitproof -->
 
-You declare what must not leak between your folds. `splitproof` builds a split that
-honours it, measures what it actually achieved, and writes a certificate anyone can
-re-derive from your data. Point it at someone else's split and it tells you what they
-really tested on.
+[![CI](https://github.com/dnncha/splitproof/actions/workflows/test.yml/badge.svg)](https://github.com/dnncha/splitproof/actions/workflows/test.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+
+Build, audit, and re-verify leakage-free train/test splits for biological and chemical datasets, with a JSON certificate anyone can recompute from scratch. Built for ML researchers in computational biology and chemistry, benchmark maintainers, and coding agents.
+
+## Quickstart
+
+Three commands to install `splitproof`, build a certified split on the bundled example, and re-verify every measurement from scratch:
 
 ```sh
-pip install splitproof
-
-splitproof init data.csv                     # guess a starter policy from the columns
-splitproof split policy.yaml                 # build the split, write a certificate
-splitproof verify splitproof.cert.json --split split.csv    # re-derive every number
-splitproof audit policy.yaml --split-column fold            # grade a split you were handed
+git clone https://github.com/dnncha/splitproof.git && cd splitproof && pip install .
+splitproof split examples/proteins.yaml
+splitproof verify splitproof.cert.json --split split.csv
 ```
 
-## Why
+To audit the random split column in that same file (exits `1` with crossing pairs and a 1-NN baseline):
 
-Biology does not lack data or models. It lacks trustworthy scoreboards.
+```sh
+splitproof audit examples/proteins.yaml --split-column fold_random
+```
 
-A random train/test split on biological data is almost always wrong, because the rows
-are not independent. Test proteins are homologs of training proteins. Test compounds
-share a scaffold with training compounds. Test cells come from a training donor, on a
-training plate, from a training site. The model learns the overlap and the benchmark
-rewards it.
+On your own CSV, TSV, FASTA, or Parquet file, run `splitproof init data.csv` to draft a starter `policy.yaml`, review and edit the constraints, then run `splitproof split policy.yaml`. Install chemistry backends with `pip install '.[chem]'` (RDKit) and Parquet support with `pip install '.[parquet]'`.
 
-The usual fix is a one-off clustering script in the paper's repo that nobody can rerun
-and no reviewer checks. `splitproof` turns that script into an artifact: a declared policy,
-a measured result, and a certificate anyone can re-verify against the data.
+## What splitproof found on public benchmarks
+
+Measured on 24 November 2026 across six MoleculeNet datasets and every reviewed human protein in UniProt ([full tables and reproduction script](docs/real-data.md)):
+
+- **Every random 80/20 split of six MoleculeNet benchmarks leaks.** On HIV (41,127 molecules), 55 duplicate compounds and 2,455 pairs at Tanimoto >= 0.8 cross train/test. On BACE (1,513 molecules), 1 duplicate compound, 491 pairs at Tanimoto >= 0.8, and 3,774 pairs sharing ring systems cross the split. Lipophilicity is the only set with zero duplicate compounds, and it still puts 411 pairs at Tanimoto >= 0.8 on both sides.
+- **BACE's official split puts the same compound in both train and test.** Auditing BACE's published `Model` column (train vs valid+test) flags `BACE_72` in `train` and `BACE_669` in `test`: the same molecule, neutral in train and protonated at the guanidine in test. Raw SMILES comparison misses it; RDKit charge neutralisation catches it.
+- **MMseqs2 sequence identity finds 33x as many related human proteins as k-mer Jaccard.** Across all 20,429 reviewed human proteins in UniProt (Swiss-Prot), MMseqs2 identity (>= 0.3, coverage 0.8) finds 137,696 related pairs (46,874 crossing a random 80/20 split), compared with 4,126 pairs (1,316 crossing) for k-mer Jaccard (k=5, >= 0.3).
+
+| Benchmark | Rows | Constraint audited | Related pairs | Crossing train/test |
+| --- | --- | --- | --- | --- |
+| BACE (random 80/20) | 1,513 | Tanimoto >= 0.8 | 1,624 | 491 |
+| BACE (random 80/20) | 1,513 | same ring systems | 11,565 | 3,774 |
+| BACE (official `Model`) | 1,513 | same compound (neutralised) | 1 | 1 (`BACE_72` / `BACE_669`) |
+| BBBP (random 80/20) | 2,050 | same compound / Tanimoto >= 0.8 | 78 / 251 | 25 / 64 |
+| ClinTox (random 80/20) | 1,484 | same compound / Tanimoto >= 0.8 | 61 / 169 | 17 / 48 |
+| ESOL (random 80/20) | 1,128 | same compound / Tanimoto >= 0.8 | 11 / 224 | 3 / 79 |
+| Lipophilicity (random 80/20) | 4,200 | same compound / Tanimoto >= 0.8 | 0 / 1,217 | 0 / 411 |
+| HIV (random 80/20) | 41,127 | same compound / Tanimoto >= 0.8 | 197 / 7,455 | 55 / 2,455 |
+| UniProt human (random 80/20) | 20,429 | k-mer Jaccard >= 0.3 (k=5) | 4,126 | 1,316 |
+| UniProt human (random 80/20) | 20,429 | MMseqs2 identity >= 0.3, cov 0.8 | 137,696 | 46,874 |
 
 ## How it works
 
-You declare what must not leak. `splitproof` makes the split that honours it, measures what
-it achieved, and anchors the result to digests of the policy, the data and the
-assignment, so any change is detectable.
+A random split fails on biological data because rows share homology, chemical scaffolds, donors, plates, sites, or deposition dates. Instead of keeping a one-off clustering script in a paper repository, you declare your leakage rules in a policy file:
 
 ```yaml
 splitproof: 1
@@ -67,27 +82,20 @@ constraints:
 seed: 7
 ```
 
-That policy says three things: no pair of sequences at or above 30% identity may cross
-folds, no donor may appear in two folds, and nothing deposited on or after 2025-06-01
-may end up in training.
+This policy enforces three rules: no sequence pair at or above 30% identity may cross folds, no donor may appear in two folds, and nothing deposited on or after `2025-06-01` may land in `train`.
 
-`splitproof` enforces them by building a graph of everything that must stay together —
-similarity edges above the threshold, plus shared group values — taking its connected
-components as the atomic units of assignment, and packing those units into folds with a
-deterministic, label-stratified, seeded allocator. Because the components are
-single-linkage at exactly the declared threshold, no pair at or above the threshold can
-end up on opposite sides. That is a property of the construction, not a hope.
+`splitproof` builds a graph of everything that must stay together (similarity edges at or above the threshold plus shared group values), takes its single-linkage connected components as atomic independent units, and packs those units into folds with a deterministic, row-order-invariant, quantile-stratified allocator under `seed`. Because components are single-linkage at the declared threshold, zero pairs at or above that threshold can land on opposite sides.
 
-## The certificate
+## The certificate and verification
 
-Every split writes a `splitproof.cert.json`: small, diffable, and safe to commit.
+Every `splitproof split` writes `splitproof.cert.json`: small, diffable, and safe to commit alongside your code.
 
 ```json
 {
-  "status": "satisfied",
-  "policy_digest": "sha256:…",
-  "dataset": { "digest": "sha256:…", "entities": 4817 },
-  "assignment": { "digest": "sha256:…" },
+  "status": "satisfied_unproven",
+  "policy_digest": "sha256:...",
+  "dataset": { "digest": "sha256:...", "entities": 4817 },
+  "assignment": { "digest": "sha256:..." },
   "constraints": [
     {
       "id": "sequence:identity@0.3",
@@ -102,174 +110,102 @@ Every split writes a `splitproof.cert.json`: small, diffable, and safe to commit
 }
 ```
 
-`splitproof verify` rebuilds the whole certificate from the data and the fold column and
-compares it field by field: the digests, every constraint's measured values, the unit
-structure, the backends and their parameters, and the leakage diagnostics. A certificate
-whose numbers were edited by hand does not verify, and the failure names the exact path:
+`splitproof verify` rebuilds the certificate from scratch from the data and fold assignments and compares every section field by field: policy, digests, unit structure, backends and parameters, per-constraint measurements, and leakage diagnostics. Editing a single measurement fails verification and names the exact path:
 
-```
+```text
 FAIL constraints: every constraint re-measures to exactly the recorded values
-       constraints[0].measured.max_cross_fold_similarity: certificate says 0.0, recomputed None
+       constraints[0].measured.max_cross_fold_similarity: certificate says 0.0 (float), recomputed None (NoneType)
 ```
 
-Exit codes: `0` verified, `1` the certificate verifies and records a violated constraint
-(or `--require-exact` was set and it is not proven exhaustively), `2` verification itself
-failed. The certificate records the data's content digest, not its path, so it verifies on
-another machine. Put it in CI and your split stops being a claim in a methods
-section.
+Exit codes across all commands:
 
-The certificate is a reproducibility anchor, not a cryptographic signature. It detects
-drift — edited data, a swapped assignment, a changed policy — and it lets a third party
-re-derive the measurements themselves. It does not attest to who produced it. Sign the
-file with your own key if you need that.
+- `0`: clean (split built, audit passed, or certificate verified)
+- `1`: a declared constraint is violated, or `--require-exact` rejected an unproven result
+- `2`: usage, data, policy, or verification failure
+- `3`: infeasible split (for example `GIANT_UNIT` or fewer units than folds)
+
+The certificate anchors measurements to content digests, so it verifies on another machine when `--data` is supplied. It is a reproducibility and integrity anchor rather than a cryptographic signature; sign the file with GPG or Sigstore if you need authorship proof. See [SECURITY.md](SECURITY.md) for the untrusted-certificate threat model.
 
 ## What the status word does not mean
 
-`splitproof` fails only on constraints you declared, which means **a lax policy gets a clean
-status**. Declare k-mer Jaccard at 0.95 on a set of close homologs and you will be told
-`proven`, truthfully, because no pair at 0.95 crosses folds.
+`splitproof` checks only the constraints your policy declares, so a lax policy gets a clean status. Auditing the example's random split with `kmer_jaccard` at `0.95` reports `proven` truthfully because no pair reaches `0.95`, and prints the worst held-out similarity on the very next line:
 
-This is deliberate: a tool that invented its own identity cutoff would be asserting an
-opinion your field has not agreed on. But it means the status word alone is not a quality
-claim, so splitproof prints the number that contradicts it on the very next line:
-
-```
+```text
+240 entities in 240 independent units; folds: test=74, train=166.
 Constraint status: proven.
-Worst held-out similarity to the reference fold: 0.87013 on sequence:kmer_jaccard@0.95
-  (74 of 74 held-out items have any neighbour).
-That status covers only the constraints the policy declared. Read the numbers below
-  before treating this split as hard.
+Worst held-out similarity to the reference fold: 0.87013 on sequence:kmer_jaccard@0.95 (74 of 74 held-out items have any neighbour).
+That status covers only the constraints the policy declared. Read the numbers below before treating this split as hard.
+- no pair above kmer_jaccard 0.95 on 'sequence' may cross folds: proven.
+Similarity baseline on sequence:kmer_jaccard@0.95: spearman=0.881475 over 74 held-out items. Report any model score next to this one.
+Held-out items' nearest reference similarity on sequence:kmer_jaccard@0.95: median 0.630189, p99 0.792531, max 0.87013.
 ```
 
-Quote the status and the worst similarity together, or neither.
+Quote the status word and the worst nearest-neighbour similarity together.
 
 ## Honesty rules
 
-These are load-bearing, not decoration.
+**No invented thresholds.** `splitproof` fails only on constraints you declared. It enforces no hidden cutoff of its own.
 
-**It never invents a threshold.** `splitproof` fails only on constraints you declared. It
-has no opinion about what identity cutoff your field should use, and it will not quietly
-grade your data against one.
-
-**It distinguishes proof from evidence.** Every backend declares its exactness, and the
-certificate records it.
+**Proof separated from evidence.** Every backend declares its exactness, and the certificate records it:
 
 | exactness | meaning | status when clean |
 | --- | --- | --- |
-| `exact` | every pair was compared | `satisfied` |
-| `heuristic` | a sensitive but incomplete search (MMseqs2) | `satisfied_unproven` |
-| `lower_bound` | approximate candidate generation (MinHash LSH) | `satisfied_unproven` |
+| `exact` | every pair was compared | `satisfied` (`proven`) |
+| `heuristic` | sensitive but incomplete search (MMseqs2) | `satisfied_unproven` |
+| `lower_bound` | approximate candidate search (MinHash LSH) | `satisfied_unproven` |
 
-A clean result from an approximate backend is reported as *no violation found*, never as
-proven. `splitproof` will not launder a heuristic into a guarantee.
+Any row with an absent or unparsable key value also downgrades a clean status to `satisfied_unproven` with a count of unconstrained rows. Pass `--require-exact` in CI to fail unless every constraint is `satisfied`.
 
-**It does not call k-mer Jaccard "identity".** Without MMseqs2 installed, the sequence
-backend computes exact k-mer Jaccard and says so. It is a real, reproducible,
-exactly-computed similarity — and it is not sequence identity, so it does not get that
-name.
+**k-mer Jaccard is never called identity.** Without MMseqs2 installed, the built-in sequence backend computes exact k-mer Jaccard and labels it `kmer_jaccard`.
 
-**It refuses to exhaust your memory.** The pair graph is quadratic in the worst case: a
-dataset where everything is related to everything at the declared threshold has as many
-edges as it has pairs. Edges are stored in numpy arrays rather than Python tuples, and
-past `--max-pairs` you get `TOO_MANY_PAIRS` with a remedy instead of an OOM kill. A
-2000-sequence single-family blob at 0.3 produces 1.9M edges in 0.8s; 5000 produces 11.7M
-in 4.9s and 233MB of edge storage.
+**Bounded memory on dense graphs.** Similarity pair graphs are quadratic in the worst case. Edges live in numpy arrays inside `PairCollector`, and exceeding `--max-pairs` (default 20,000,000) raises `TOO_MANY_PAIRS` with a remedy instead of an OOM kill. A 2,000-sequence single-family blob at 0.3 produces 1.9M edges in 0.8s; 5,000 produces 11.7M edges in 4.9s and 233MB of edge storage.
 
-**A constraint that cannot bind is an error, not a pass.** If every entity lacks a usable
-value for a similarity key, the constraint could never fire and a clean result would
-prove nothing, so you get `CONSTRAINT_VACUOUS`. This is not hypothetical: RDKit
-2026.09's `MurckoDecompose` raises on every molecule, and an earlier build of splitproof
-swallowed that into "no scaffolds" and reported the split as satisfied.
+**Unbinding constraints fail instead of passing.** If zero rows carry a usable value for a similarity, group, or date key, `splitproof` raises `CONSTRAINT_VACUOUS`. (RDKit 2026.09's `MurckoDecompose` raises on every molecule; an early build swallowed that into "no scaffolds" and reported `satisfied`, which led to this guard.)
 
-**It honours the fractions you asked for.** Fold sizes come first and label
-stratification only breaks exact ties, so splitproof will not quietly hand you a 75/25
-split because that balanced the labels better. Granularity is bounded by your largest
-unit, and the drift is always reported.
+**Fractions first, impossible splits refused.** Fold sizes take priority and label stratification breaks exact ties, so `splitproof` reports fold drift transparently. When a single homology component is too large to fit in any fold, it refuses with `GIANT_UNIT` and points you to `splitproof units`, `leave-unit-out`, or `--tolerance`.
 
-**It refuses impossible splits instead of producing bad ones.** If the largest connected
-unit cannot fit in any fold, you get `GIANT_UNIT` and an explanation: your data is one
-homology blob at that threshold, and a balanced split does not exist. Raise the
-threshold, switch to `leave-unit-out`, or widen `--tolerance` — but you will not get a
-split that silently buries the problem.
+## Diagnostics
 
-## Diagnostics worth more than the split
+Both `splitproof split` and `splitproof audit` measure three diagnostics:
 
-`splitproof split` and `splitproof audit` both report:
+- **Nearest-neighbour similarity distribution** (`min`, `p50`, `p90`, `p99`, `max`) from held-out rows to the reference fold (`train`, or the rest of the folds under `kfold`).
+- **1-NN similarity baseline**, which predicts each held-out row's label from its closest training neighbour. Similarity reasoning is a legitimate model, so this is neither a hard floor nor a ceiling: a model that fails to beat it has not shown it learned beyond similarity, and beating it does not by itself prove the split is sound. Always report the coverage (`with_a_neighbour` / `queries`) alongside the score.
+- **Independent unit structure**: total unit count and `largest_unit_fraction`, showing your real effective sample size.
 
-- **Nearest-neighbour similarity distribution** for every held-out item against the
-  reference fold — median, p99, max. The shape of your actual generalisation gap.
-- **The similarity baseline.** A 1-NN model that just copies its most similar training
-  neighbour's label. Similarity reasoning is a legitimate model, especially in chemistry,
-  so this is neither a floor nor a ceiling: a model that does not clearly beat it has not
-  shown it learned anything beyond similarity, and beating it is not on its own evidence
-  that the split is sound. This number belongs next to every reported score and is in
-  almost none.
-- **Unit structure.** How many independent units exist, and what fraction of your data
-  sits in the largest one. Most people have never looked, and are surprised.
+## Worked example
 
-## A worked example
+`examples/proteins.csv` is a synthetic 240-sequence dataset (40 homologous families across 6 donor groups) with a 70/30 random split in `fold_random`. Auditing `fold_random`:
 
-`examples/proteins.csv` holds 240 sequences in 40 homologous families, with a 70/30
-random split in the `fold_random` column — the split almost every pipeline produces by
-default. Auditing it:
-
-```
-$ splitproof audit proteins.yaml --split-column fold_random
+```text
+$ splitproof audit examples/proteins.yaml --split-column fold_random
 240 entities in 6 independent units; folds: test=74, train=166.
 Constraint status: VIOLATED.
+Worst held-out similarity to the reference fold: 0.87013 on sequence:kmer_jaccard@0.4 (74 of 74 held-out items have any neighbour).
 - no pair above kmer_jaccard 0.4 on 'sequence' may cross folds: VIOLATED.
 - no value of 'donor_id' may appear in more than one fold: VIOLATED.
-Worst held-out similarity to the reference fold: 0.87013 (74 of 74 held-out items have
-  any neighbour).
-Similarity baseline on sequence:kmer_jaccard@0.4: spearman=0.881475 over 74 held-out
-  items. Report any model score next to this one.
-Held-out items' nearest reference similarity: median 0.630189, p99 0.792531, max 0.87013.
+Similarity baseline on sequence:kmer_jaccard@0.4: spearman=0.881475 over 74 held-out items. Report any model score next to this one.
+Held-out items' nearest reference similarity on sequence:kmer_jaccard@0.4: median 0.630189, p99 0.792531, max 0.87013.
 ```
 
-217 of the 500 homologous pairs straddle the split, the median held-out sequence is 63%
-similar to something in training, and **a model that does nothing but copy its nearest
-training neighbour's label scores 0.88.** Any result near 0.9 on this split is
-indistinguishable from having learned nothing.
+On the random split, 217 of 500 related pairs cross folds, the median held-out sequence has 0.63 k-mer Jaccard to training, and copying the nearest training neighbour scores Spearman `0.881475`.
 
-The same data, split by `splitproof`:
+Splitting the same data with `splitproof`:
 
-```
-$ splitproof split proteins.yaml
+```text
+$ splitproof split examples/proteins.yaml
 240 entities in 6 independent units; folds: test=42, train=198.
 Constraint status: proven.
-Worst held-out similarity to the reference fold: 0.00232 (38 of 42 held-out items have
-  any neighbour).
-Similarity baseline: spearman=-0.243314 over 38 held-out items.
+Worst held-out similarity to the reference fold: 0.00232 on sequence:kmer_jaccard@0.4 (38 of 42 held-out items have any neighbour).
+That status covers only the constraints the policy declared. Read the numbers below before treating this split as hard.
+- no pair above kmer_jaccard 0.4 on 'sequence' may cross folds: proven.
+- no value of 'donor_id' may appear in more than one fold: proven.
+Similarity baseline on sequence:kmer_jaccard@0.4: spearman=-0.243314 over 38 held-out items. Report any model score next to this one.
+Held-out items' nearest reference similarity on sequence:kmer_jaccard@0.4: median 0.00232, p99 0.00232, max 0.00232.
 ```
 
-The baseline collapses from 0.88 to -0.24, and the worst held-out similarity falls from
-0.87 to 0.002. That gap is how much of the original score was leakage.
+The 1-NN baseline drops from `0.881475` (over 74/74 items) to `-0.243314` (over the 38/42 items that share any k-mer with train), and the worst held-out similarity drops from `0.87013` to `0.00232`. Because six donor groups merge the 240 rows into six units, achievable fold sizes are 42/198 rather than 48/192, and `splitproof` reports that drift.
 
-Note the baseline's denominator: 38 of the 42 held-out items, because only those share
-any k-mer with the training fold at all. The other 4 have no nearest neighbour to copy,
-which is the point of the split. `with_a_neighbour` in the JSON always reports that
-coverage, so the baseline is never quoted without it.
-
-The example data is synthetic and built to make the point: 40 homologous families with
-near-constant labels, and six donor groups that collapse them into six units. It
-demonstrates the mechanism; it is not evidence about any real dataset.
-
-For real data, [docs/real-data.md](docs/real-data.md) audits seven public benchmarks: six
-MoleculeNet sets and every reviewed human protein in UniProt.
-
-Note the fold sizes: 42/198, not the requested 48/192. Six donor groups across 240 rows
-means only six independent units exist, so the achievable fractions are coarse.
-`splitproof` reports the drift rather than hiding it.
-
-## With real sequence identity
-
-Install MMseqs2 and the same audit speaks in the units a biologist argues in:
-
-```
-$ splitproof audit proteins-identity.yaml --split-column fold_random
-Constraint status: VIOLATED.
-- no pair above identity 0.3 on 'sequence' may cross folds: VIOLATED.
-```
+With MMseqs2 installed (`examples/proteins-identity.yaml`, `identity >= 0.3`), auditing `fold_random` reports true sequence identity:
 
 ```json
 "cross_fold_pairs_at_or_above_threshold": 248,
@@ -279,90 +215,99 @@ Constraint status: VIOLATED.
 "nearest_neighbour_baseline": {"metric": "spearman", "value": 0.880675, "compared": 74}
 ```
 
-**Every single held-out sequence has a training relative at 87.7% identity or better**,
-median 95.4%. That is the sentence to put in front of anyone defending a random split.
+Every held-out sequence has a training relative at 87.7% identity or higher (median 95.4%). When a split passes MMseqs2 identity, its status is `satisfied_unproven` because MMseqs2 is heuristic.
 
-Note the status is `satisfied_unproven` rather than `satisfied` when such a split comes
-back clean: MMseqs2 is sensitive but heuristic, so absence of a crossing pair is strong
-evidence and not a proof. splitproof says which it has.
+## Using splitproof with AI agents
 
-## Auditing somebody else's split
+`splitproof` exposes the same workflow over a zero-dependency stdio MCP server (`splitproof mcp`) and via `--json` CLI output with structured error codes (`code`, `message`, `remedy`, `details`), deterministic seeds, and working-directory write confinement.
 
-The fastest way to find out whether a benchmark means anything:
+MCP tools: `splitproof_init`, `splitproof_units`, `splitproof_split`, `splitproof_audit`, `splitproof_verify`, `splitproof_explain`.
+
+### Claude Code
 
 ```sh
-splitproof audit policy.yaml --split-column split --report leakage.md
+claude mcp add splitproof -- splitproof mcp
 ```
 
-Exit code 1 and a list of the worst crossing pairs, by similarity, with ids.
-
-## Built for agents
-
-`splitproof` is designed to be driven by an AI agent as much as by a human.
-
-- Every command takes `--json` and emits a stable schema with a `summary` field written
-  to be read by a model.
-- Errors are structured: a machine-parseable `code`, a human `message`, an actionable
-  `remedy`, and `details`. `GIANT_UNIT` tells the agent what to change.
-- Exit codes are meaningful: `0` clean, `1` constraint violated, `2` usage or data
-  error, `3` the split is infeasible as specified.
-- Deterministic under `seed`, so an agent's run reproduces exactly.
-- No network access, no telemetry, no hidden state.
-- `--require-exact` fails the build unless every constraint was proven exhaustively, so
-  an agent cannot quietly accept `satisfied_unproven` as a pass.
-
-`splitproof mcp` serves the same operations over stdio with no extra dependencies:
+Or add `.mcp.json` in your project root:
 
 ```json
-{ "mcpServers": { "splitproof": { "command": "splitproof", "args": ["mcp"] } } }
+{
+  "mcpServers": {
+    "splitproof": {
+      "command": "splitproof",
+      "args": ["mcp"]
+    }
+  }
+}
 ```
 
-Tools: `splitproof_init`, `splitproof_split`, `splitproof_audit`, `splitproof_verify`,
-`splitproof_units`, `splitproof_explain`. [`agent/SKILL.md`](agent/SKILL.md) is a drop-in skill
-file telling an agent when to reach for it and how to read the result honestly.
+### Cursor
 
-## Backends
+Add `.cursor/mcp.json` (or `~/.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "splitproof": {
+      "command": "splitproof",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Codex
+
+```sh
+codex mcp add splitproof -- splitproof mcp
+```
+
+Or add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.splitproof]
+command = "splitproof"
+args = ["mcp"]
+```
+
+Drop [`agent/SKILL.md`](agent/SKILL.md) into your agent's skill directory for full operating rules. Machine-readable discovery files: [`llms.txt`](llms.txt) and [`server.json`](server.json).
+
+## Backends and formats
 
 | metric | backend | needs | exactness |
 | --- | --- | --- | --- |
-| `identity` | MMseqs2 | `mmseqs` on PATH | heuristic |
-| `kmer_jaccard` | exact sparse Jaccard | core install | exact |
-| `kmer_jaccard` | MinHash LSH (large n) | core install | lower bound |
-| `tanimoto` | RDKit Morgan fingerprints | `splitproof[chem]` | exact |
-| `ring_systems` | canonical ring-system set over RDKit | `splitproof[chem]` | exact |
-| `canonical_smiles` | RDKit canonical SMILES, desalted | `splitproof[chem]` | exact |
-| `exact_duplicate` | normalised equality | core install | exact |
+| `identity` | MMseqs2 | `mmseqs` on `PATH` | `heuristic` |
+| `kmer_jaccard` | exact sparse Jaccard (`n <= --exact-max-n`, default 20,000) | core install | `exact` |
+| `kmer_jaccard` | MinHash LSH (`n > --exact-max-n`) | core install | `lower_bound` |
+| `tanimoto` | RDKit Morgan fingerprints (desalted, neutralised) | `splitproof[chem]` | `exact` |
+| `ring_systems` | canonical ring-system set over RDKit | `splitproof[chem]` | `exact` |
+| `canonical_smiles` | RDKit canonical SMILES (desalted, neutralised) | `splitproof[chem]` | `exact` |
+| `exact_duplicate` | normalised equality | core install | `exact` |
 
-Reads CSV, TSV, FASTA, and Parquet with `splitproof[parquet]`.
+Reads CSV, TSV, FASTA, and Parquet (`splitproof[parquet]`). Only empty or whitespace-only cells are treated as missing; literal values like `NA`, `None`, and `Null` remain valid group names.
 
-`exact_duplicate` folds case only for sequence keys, where the alphabet is
-case-insensitive. It does not fold case for molecules, because in SMILES case is
-semantic: upper-casing turns benzene into cyclohexane. For "is this the same
-compound", use `canonical_smiles`, which compares RDKit canonical SMILES of the
-largest covalent fragment, so a salt and its parent and two spellings of one molecule
-are one compound while enantiomers are not.
+- `exact_duplicate` folds case for sequences and preserves case for SMILES (where upper-casing changes aromaticity).
+- `canonical_smiles`, `ring_systems`, and `tanimoto` share one RDKit standardisation step: salt stripping, largest-fragment selection, and charge neutralisation (inorganic salts without carbon are kept whole).
+- `ring_systems` groups molecules by their canonical set of ring systems (element and aromaticity, stereochemistry stripped) rather than Bemis-Murcko scaffolds, because linkers are excluded (grouping more widely, the safe direction for a split) and RDKit 2026.09's `MurckoDecompose` raises on every input.
+- Numeric labels are stratified by quantile bucket; high-cardinality non-numeric columns are reported as unstratified rather than treated as thousands of classes.
 
-The `ring_systems` backend groups molecules by their canonical set of ring systems,
-computed as SMILES fragments of the parent molecule so nothing is edited and nothing
-needs re-sanitising. It is deliberately not called `scaffold`: linkers between ring
-systems are not part of the key, so it groups more widely than a Bemis-Murcko scaffold,
-which is the safe direction for a split. RDKit's own `MurckoScaffoldSmiles` is unusable
-because `MurckoDecompose` raises on every input in RDKit 2026.09, and a hand-rolled
-Murcko reduction crashed on indole, caffeine, tryptophan and every nucleobase.
+## Scope and current limits
 
-Numeric labels are stratified by quantile bucket rather than by raw value, and a label
-with more distinct values than a sensible class count is reported as not stratified
-rather than silently treated as thousands of classes.
+`splitproof` is evaluation infrastructure for proteins, nucleic acids, small molecules, cells, donors/patients, and temporal splits. It hosts no optimisation loop or screening oracle.
 
-## Scope
+Not yet implemented in `0.1.0` (tracked in [NET.md](NET.md)):
 
-`splitproof` is for splitting and auditing datasets in clinical genomics, cell biology,
-ADMET and toxicology, imaging, and proteomics. It is evaluation infrastructure: it
-measures and constrains, and it hosts no optimisation loop or screening oracle.
+- 3D structural similarity (Foldseek or pocket similarity)
+- 2D or bipartite splits (cold-ligand, cold-target, or double-cold interaction splits)
+- In-memory pandas/Polars/AnnData DataFrame API
+- Opt-in bridge-entity dropping (`--max-drop`) for breaking giant single-linkage components
 
-## Status
+## Status, citation, and license
 
-v0.1. The policy schema and certificate schema are versioned; both will change before
-1.0 and the version field is how you will know.
+v0.1.0 ([CHANGELOG.md](CHANGELOG.md)). Policy schema (`splitproof: 1`) and certificate schema (`schema: 1`) are versioned and may evolve before `1.0`.
 
-Apache-2.0.
+- Citation metadata: [CITATION.cff](CITATION.cff)
+- Security and threat model: [SECURITY.md](SECURITY.md)
+- Website: [dnncha.github.io/splitproof](https://dnncha.github.io/splitproof/)
+- License: [Apache-2.0](LICENSE)
