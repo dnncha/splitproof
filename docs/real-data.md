@@ -2,10 +2,11 @@
 
 Measured on 24 November 2026 with splitproof between commits f39d777 and fe73796, RDKit
 2026.09, on a Colab CPU runtime. The commits in that range change speed and fold packing, not
-any audit number below. Every split that splitproof built from these policies re-verified against its own
-certificate. No command printed a traceback.
+any audit number below. Every split splitproof built from these policies re-verified against
+its own certificate, except two not run to save time: HIV under Tanimoto (seven minutes per
+verify) and human proteins under MMseqs2 identity (twenty). No command printed a traceback.
 
-The datasets are MoleculeNet CSVs from DeepChem's public bucket, read as published. Each row
+`scripts/realdata.py` reproduces every number here. The datasets are MoleculeNet CSVs from DeepChem's public bucket, read as published. Each row
 got an id where the file had none. The "random" column is a seeded 80/20 split, the split most
 pipelines start from.
 
@@ -33,6 +34,23 @@ stereochemistry kept. Lipophilicity is the only set with no duplicate compounds;
 
 Rows whose SMILES RDKit cannot parse are counted, not dropped, and a clean result on a key with
 any unparsable row is reported as `satisfied_unproven`, never `proven`.
+
+## Human proteins
+
+All 20429 reviewed human proteins in UniProt (Swiss-Prot, organism 9606), downloaded on the
+day, with the same seeded 80/20 random split:
+
+| Key | Related pairs | Pairs crossing train/test | Independent units | Largest unit |
+|---|---|---|---|---|
+| k-mer Jaccard ≥ 0.3 (k=5) | 4126 | 1316 | 18877 | 27 |
+| MMseqs2 identity ≥ 0.3, coverage 0.8 | 137696 | 46874 | 12899 | 430 |
+
+k-mer Jaccard is a lower bound on homology, not identity, and misses most of it: sequence
+identity finds 33 times as many related pairs. A protein benchmark checked only with k-mers
+should be read as unchecked for remote homology.
+
+The identity audit took 20 minutes on one core, because splitproof runs MMseqs2 with a single
+thread.
 
 ## BACE's own split puts one compound on both sides
 

@@ -55,13 +55,14 @@ Scheduled: weekly mutation testing (GitHub Actions `mutation`, Mondays 04:17 UTC
 
 ## Holes, ranked
 
-1. **No real public dataset has been audited.** Every number in the README comes from
-   synthetic families. All three reviewers named this as the thing that decides whether
-   splitproof becomes infrastructure or stays a repo. Dry-run first against messy real
-   benchmarks (MoleculeNet BACE and ClinTox for salts, enantiomers and N-methyl series;
-   TDC ADMET; a protein set such as DeepLoc or PEER), fix whatever they expose, then
-   publish one table per benchmark with the crossing pairs and the similarity baseline
-   beside the published leaderboard score (~1 week).
+1. **Real benchmarks are audited, but not yet beside their leaderboards.** A dry run on six
+   MoleculeNet sets and 20k human proteins ran on Colab, found two performance defects and no
+   soundness defect, and is written up in `docs/real-data.md`. Still missing: TDC ADMET and a
+   PEER or DeepLoc protein task with their official splits, and the nearest-neighbour baseline
+   beside each published leaderboard score (~3 days). Rerun `scripts/realdata.py` (downloads
+   the data, audits, splits and verifies each set) before changing chemistry or identity
+   defaults.
+
 2. **`GIANT_UNIT` refuses where the field removes a minimal set of bridge entities.**
    Single-linkage chaining collapses most real protein and medchem sets into one
    component at the thresholds people argue for, and the current remedies are "raise the

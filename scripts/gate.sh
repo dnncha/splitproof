@@ -19,7 +19,7 @@ fi
 PYTHON="$(cd "$(dirname "$PYTHON")" && pwd)/$(basename "$PYTHON")"
 
 echo "== lint =="
-"$PYTHON" -m ruff check src tools tests
+"$PYTHON" -m ruff check src tools tests scripts
 
 echo "== types =="
 "$PYTHON" -m mypy src/splitproof

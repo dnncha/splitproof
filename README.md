@@ -254,6 +254,9 @@ The example data is synthetic and built to make the point: 40 homologous familie
 near-constant labels, and six donor groups that collapse them into six units. It
 demonstrates the mechanism; it is not evidence about any real dataset.
 
+For real data, [docs/real-data.md](docs/real-data.md) audits seven public benchmarks: six
+MoleculeNet sets and every reviewed human protein in UniProt.
+
 Note the fold sizes: 42/198, not the requested 48/192. Six donor groups across 240 rows
 means only six independent units exist, so the achievable fractions are coarse.
 `splitproof` reports the drift rather than hiding it.
