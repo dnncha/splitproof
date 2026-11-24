@@ -88,6 +88,13 @@ Scheduled: weekly mutation testing (GitHub Actions `mutation`, Mondays 04:17 UTC
    enough units, over random unit sizes and fractions. What is still unmeasured is the gap
    to an optimal packing; a brute-force comparison on small instances would show it (~1 h).
 
+8. **813 mutants survive in `evaluate.py`, `assign.py` and `cert.py`** (issue #1, first weekly
+   run on f90fe03's parent). Most mutate error-message text, but `assign`, `check_audit_folds`,
+   `_fill_empty_folds`, `_check_disjoint`, `_check_temporal` and `cert.verify` each carry
+   dozens of logic survivors. Triage by function, write an oracle or exact-value test per
+   function as `tests/test_crossing_oracle.py` did for `_crossing_classes`, and mark
+   message-only mutants with `# pragma: no mutate` (~1 day).
+
 ## Escape log
 
 | Date | Symptom | Root cause | Class | Caught by | Fixed (+siblings) | Class guard | Rung | Time to red | Proved |
