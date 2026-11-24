@@ -7,7 +7,7 @@ name = "cutsite"
 version = "0.1.0"
 description = "Build, audit and prove leakage-free train/test splits for biological data."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
 keywords = [
   "machine learning",
