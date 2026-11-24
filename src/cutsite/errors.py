@@ -41,6 +41,10 @@ class GiantUnit(InfeasibleSplit):
     code = "GIANT_UNIT"
 
 
+class VacuousConstraint(CutsiteError):
+    code = "CONSTRAINT_VACUOUS"
+
+
 class CertificateMismatch(CutsiteError):
     code = "CERT_MISMATCH"
 

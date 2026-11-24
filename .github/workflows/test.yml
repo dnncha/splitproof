@@ -21,3 +21,42 @@ jobs:
       - run: pip install -e '.[dev]'
       - name: gate
         run: PYTHON=$(command -v python) ./scripts/gate.sh
+
+  identity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e '.[dev]'
+      - name: install MMseqs2
+        run: |
+          curl -fsSL -o mmseqs.tar.gz \
+            https://github.com/soedinglab/MMseqs2/releases/download/20-ae60e/mmseqs-linux-avx2.tar.gz
+          tar xzf mmseqs.tar.gz
+          echo "$PWD/mmseqs/bin" >> "$GITHUB_PATH"
+      - name: the identity backend really runs
+        run: |
+          mmseqs version
+          python -m pytest -q tests/test_identity.py
+      - name: end to end on real sequence identity
+        working-directory: examples
+        run: |
+          python -m cutsite.cli split proteins-identity.yaml --out id.csv --cert id.json
+          python -m cutsite.cli verify id.json --split id.csv
+          if python -m cutsite.cli audit proteins-identity.yaml --split-column fold_random >/dev/null; then
+            echo "the random split should have failed the identity audit, and did not" >&2
+            exit 1
+          fi
+
+  chem:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[dev,chem]'
+      - name: the rdkit backends really run
+        run: python -m pytest -q tests/test_chem.py

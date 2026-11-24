@@ -1,0 +1,26 @@
+cutsite: 1
+dataset:
+  path: proteins.csv
+  id: accession
+  similarity:
+    sequence:
+      column: sequence
+      kind: protein
+  groups:
+  - donor_id
+  dates:
+    deposited: deposited
+  label: activity
+scheme:
+  kind: holdout
+  fractions:
+    train: 0.8
+    test: 0.2
+constraints:
+- kind: similarity
+  key: sequence
+  metric: identity
+  threshold: 0.3
+- kind: disjoint
+  key: donor_id
+seed: 7

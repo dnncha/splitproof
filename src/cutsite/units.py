@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .dataset import Dataset
-from .errors import PolicyError
+from .errors import PolicyError, VacuousConstraint
 from .policy import Policy, SimilarityConstraint
 from .sim import DEFAULT_MAX_PAIRS, EXACTNESS_RANK, SimilarityResult, resolve
 
@@ -56,6 +56,7 @@ class UnitGraph:
     merge_counts: Dict[str, int]
     dropped: List[int] = field(default_factory=list)
     spanning_units: int = 0
+    stratify: str = "none"
 
     @property
     def exactness(self) -> str:
@@ -87,6 +88,7 @@ class UnitGraph:
             "pinned_units": sum(1 for unit in self.units if unit.pinned),
             "spanning_units": self.spanning_units,
             "dropped_entities": len(self.dropped),
+            "stratify": self.stratify,
             "exactness": self.exactness,
             "similarity": {key: result.to_dict() for key, result in sorted(self.similarity.items())},
         }
@@ -102,6 +104,51 @@ def _percentiles(sizes: Sequence[int]) -> Dict[str, int]:
         return int(ordered[position])
 
     return {"p50": pick(0.5), "p90": pick(0.9), "p99": pick(0.99), "max": int(ordered[-1])}
+
+
+MAX_STRATIFY_CLASSES = 50
+NUMERIC_BUCKETS = 4
+MISSING_CLASS = "__missing__"
+
+
+def label_classes(policy: Policy, data: Dataset) -> Tuple[Optional[List[str]], str]:
+    """Stratification classes per entity, and a word for how they were derived.
+
+    A continuous label has as many values as rows, so stratifying on raw values is
+    noise. Numeric labels become quantile buckets. A categorical label with more
+    classes than MAX_STRATIFY_CLASSES is almost always an identifier, so
+    stratification is skipped and the report says so.
+    """
+    if not policy.dataset.label_column:
+        return None, "none"
+    values = data.column(policy.dataset.label_column)
+    present = [value for value in values if value is not None]
+    kind = policy.dataset.label_kind
+    if kind == "auto":
+        try:
+            numbers = [float(value) for value in present]
+            kind = "numeric" if len(set(numbers)) > NUMERIC_BUCKETS * 2 else "categorical"
+        except ValueError:
+            kind = "categorical"
+    if kind == "numeric":
+        numeric = [float(value) for value in present]
+        if not numeric:
+            return None, "none"
+        import numpy as np
+
+        quantiles = [index / NUMERIC_BUCKETS for index in range(1, NUMERIC_BUCKETS)]
+        edges = np.quantile(numeric, quantiles)
+        out: List[str] = []
+        for value in values:
+            if value is None:
+                out.append(MISSING_CLASS)
+            else:
+                out.append(f"q{int(np.searchsorted(edges, float(value), side='right'))}")
+        return out, f"numeric, {NUMERIC_BUCKETS} quantile buckets"
+    distinct = len({value for value in present})
+    if distinct > MAX_STRATIFY_CLASSES:
+        return None, f"skipped, {distinct} classes is more than {MAX_STRATIFY_CLASSES}"
+    return [value if value is not None else MISSING_CLASS for value in values], "categorical"
 
 
 def _constraint_id(constraint: SimilarityConstraint) -> str:
@@ -136,6 +183,25 @@ def build(
             values, key.kind, constraint.threshold, max_pairs=max_pairs
         )
         identifier = _constraint_id(constraint)
+        if size and len(result.missing) == size:
+            raise VacuousConstraint(
+                f"every entity lacks a usable value for '{constraint.key}', so the constraint "
+                f"{identifier} could never bind and a clean result would prove nothing",
+                remedy=(
+                    "Check that the column holds what the key's 'kind' says it does, and that the "
+                    "backend can parse it. A constraint that cannot bind is worse than no "
+                    "constraint, because it reports as satisfied."
+                ),
+                details={
+                    "constraint": identifier,
+                    "key": constraint.key,
+                    "column": key.column,
+                    "kind": key.kind,
+                    "backend": result.backend,
+                    "entities": size,
+                    "notes": list(result.notes),
+                },
+            )
         similarity[identifier] = result
         merged = 0
         for left, right, _sim in result.pairs:
@@ -159,7 +225,7 @@ def build(
     for i in range(size):
         groups.setdefault(union.find(i), []).append(i)
 
-    label_values = data.column(policy.dataset.label_column) if policy.dataset.label_column else None
+    label_values, stratify_note = label_classes(policy, data)
     pins, spanning, dropped = _temporal_pins(policy, data, groups)
 
     units: List[Unit] = []
@@ -181,6 +247,7 @@ def build(
         merge_counts=merge_counts,
         dropped=sorted(dropped),
         spanning_units=spanning,
+        stratify=stratify_note,
     )
 
 

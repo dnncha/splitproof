@@ -14,6 +14,8 @@ Scheduled: none yet (see Holes)
 | inner | Backend budget conformance | `pytest -q tests/test_net.py` | inner, gate | 1 s | honest, parametrised over the backend registry |
 | gate | End-to-end split, verify, audit | `scripts/gate.sh` | gate, CI | 3 s | honest |
 | gate | Python matrix (3.10, 3.12, 3.13) | GitHub Actions `test` | gate (push, PR) | 1 min | honest |
+| gate | MMseqs2 identity path, really executed | GitHub Actions `identity` | gate (push, PR) | 2 min | honest |
+| gate | RDKit tanimoto and scaffold, really executed | GitHub Actions `chem` | gate (push, PR) | 2 min | honest |
 
 ## Risk surfaces
 
@@ -24,15 +26,14 @@ Scheduled: none yet (see Holes)
 | Certificate verification (tamper detection) | `src/cutsite/cert.py` | med × high | tests for swapped assignment, edited data, swapped policy | covered |
 | Assignment feasibility | `src/cutsite/assign.py` | med × med | giant-unit, empty-fold, temporal-span tests | covered |
 | Policy parsing (bad input accepted) | `src/cutsite/policy.py` | med × med | unit tests on each rejection path | late: no property test over malformed policies |
-| MMseqs2 backend (identity metric) | `src/cutsite/sim/mmseqs.py` | med × high | TSV parser unit test, command construction | hole: binary not installed anywhere we run, so the live path is unexercised |
-| RDKit backends (tanimoto, scaffold) | `src/cutsite/sim/chem.py` | med × med | registry budget test (skipped) | hole: rdkit not in any test environment |
+| MMseqs2 backend (identity metric) | `src/cutsite/sim/mmseqs.py` | med × high | `tests/test_identity.py` against the real binary, in CI and locally | covered |
+| RDKit backends (tanimoto, scaffold) | `src/cutsite/sim/chem.py` | med × med | `tests/test_chem.py` against real RDKit, in CI and locally | covered |
+| Fold allocation quality (starved folds, ignored fractions) | `src/cutsite/assign.py` | med × high | `tests/test_assign.py` | covered |
 | Data loading (CSV/TSV/FASTA/Parquet) | `src/cutsite/dataset.py` | med × med | duplicate-id and bad-date tests | late: no fuzz over malformed files |
 
 ## Holes, ranked
 
-1. MMseqs2 path never executed → install `mmseqs` in CI and run one real identity split (gate, ~20 min setup). This is the metric users will actually declare, and it is the only `heuristic`-exactness backend, so its measured values feed a certificate nobody has verified end to end.
-2. RDKit backends never executed → add a `chem` CI job with `pip install cutsite[chem]` and a 20-molecule scaffold split (gate, ~15 min).
-3. No property test over policy parsing → generate malformed policies and assert every rejection names a `where` locator rather than raising an unhandled error (inner, ~30 min).
+1. No property test over policy parsing → generate malformed policies and assert every rejection names a `where` locator rather than raising an unhandled error (inner, ~30 min).
 4. No scheduled tier at all → nothing runs mutation testing or a longer scale sweep. Add a weekly GitHub Actions schedule running mutation testing over `evaluate.py` and `assign.py`, red opening an issue (~45 min).
 5. No fuzz over data loading → malformed CSV/FASTA should fail with a `DataError`, never a traceback (inner, ~30 min).
 
@@ -41,6 +42,8 @@ Scheduled: none yet (see Holes)
 | Date | Symptom | Root cause | Class | Caught by | Fixed (+siblings) | Class guard | Rung | Time to red | Proved |
 |---|---|---|---|---|---|---|---|---|---|
 | 2026-11-24 | Dense dataset would be OOM-killed instead of failing cleanly; 5000-sequence single-family blob peaked at 2714 MB | Similarity pair graph materialised as Python tuples and grew quadratically, with no budget | unbounded all-pairs / dense accumulation | own scale benchmark, after the code was already pushed public | `sim/kmer.py` exact + minhash, `sim/duplicate.py`, `sim/chem.py` tanimoto + scaffold, `sim/mmseqs.py`; siblings: `evaluate.py` accumulated *and sorted* every crossing pair, `kmer.nearest` built a dense `.toarray()` block, `chem` copied the fingerprint tail per row | `tools/no_unbounded_pairs.py` bans `.toarray()`/`.todense()` and any `PairSet` built outside `PairCollector`, which is now the only route that charges the budget; plus a test parametrised over the backend registry asserting every backend raises `TOO_MANY_PAIRS` | 3 rule | 0.09 s | yes: red on the restored `.toarray()` at `kmer.py:156`, red on a planted backend bypassing the collector at `duplicate.py:54` (both the rule and the registry test), green on the fix |
+| 2026-11-24 | A scaffold split reported `satisfied` while enforcing nothing at all | `MurckoScaffold._scaffolds` caught every exception and recorded the molecule as "missing", so RDKit 2026.09's `MurckoDecompose` raising `bad any cast` on every input became a silent empty constraint | a constraint that cannot bind, reported as satisfied | running the RDKit backend for the first time, after installing rdkit to validate a CI job | removed the blanket `except` and replaced `MurckoScaffoldSmiles` with an in-house Murcko framework over RDKit primitives, which also removes the dependency on the broken API | `VacuousConstraint` in `units.build`: if every entity is missing a similarity key, the constraint could never fire, so cutsite refuses instead of reporting a pass. Applies to every backend and every metric, not just scaffold | 5 assertion; above: rungs 1-4 cannot see it, because whether a constraint can bind is a property of the data at run time, not of the code or of any type | 0.4 s | yes: simulating the broken toolkit (framework returns None for every molecule) refuses with `CONSTRAINT_VACUOUS` where the old code returned `satisfied`; also proven on an all-acyclic dataset and on an all-blank sequence column |
+| 2026-11-24 | A 60/40 split of two equal units put everything in `train` and left `test` empty | `_best_fold` scored only the candidate fold's own occupancy, so leaving another fold completely empty cost nothing; separately the label term was normalised by fold size, which systematically favoured the larger fold | greedy objective that cannot see a starved fold | running a 6-molecule scaffold split by hand while validating the chem tests | scored the whole allocation rather than the candidate fold, as summed squared relative deviation across every fold; made stratification strictly a tie-break so requested fractions are never silently traded away; bucketed numeric labels by quantile instead of treating each value as a class | `tests/test_assign.py` asserts both folds fill, that drift stays within unit granularity on 40 units, and that a continuous label is bucketed | 7 regression test; above: rungs 1-4 cannot express "this allocation is well balanced", which is a numeric property of an output, not a shape | 1 s | yes: red on the pre-fix allocator (test empty, and 30 items where 24 were asked for), green on the fix |
 
 Runs names what triggers each signal: `compiler`, `hook`, `inner`, `gate`, `release`, `live`, or `scheduled: <scheduler, cadence, where red goes>`.
 

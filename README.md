@@ -142,6 +142,17 @@ past `--max-pairs` you get `TOO_MANY_PAIRS` with a remedy instead of an OOM kill
 2000-sequence single-family blob at 0.3 produces 1.9M edges in 0.8s; 5000 produces 11.7M
 in 4.9s and 233MB of edge storage.
 
+**A constraint that cannot bind is an error, not a pass.** If every entity lacks a usable
+value for a similarity key, the constraint could never fire and a clean result would
+prove nothing, so you get `CONSTRAINT_VACUOUS`. This is not hypothetical: RDKit
+2026.09's `MurckoDecompose` raises on every molecule, and an earlier build of cutsite
+swallowed that into "no scaffolds" and reported the split as satisfied.
+
+**It honours the fractions you asked for.** Fold sizes come first and label
+stratification only breaks exact ties, so cutsite will not quietly hand you a 75/25
+split because that balanced the labels better. Granularity is bounded by your largest
+unit, and the drift is always reported.
+
 **It refuses impossible splits instead of producing bad ones.** If the largest connected
 unit cannot fit in any fold, you get `GIANT_UNIT` and an explanation: your data is one
 homology blob at that threshold, and a balanced split does not exist. Raise the
@@ -205,6 +216,30 @@ Note the fold sizes: 36/204, not the requested 48/192. Six donor groups across 2
 means only six independent units exist, so the achievable fractions are coarse.
 `cutsite` reports the drift rather than hiding it.
 
+## With real sequence identity
+
+Install MMseqs2 and the same audit speaks in the units a biologist argues in:
+
+```
+$ cutsite audit proteins-identity.yaml --split-column fold_random
+Constraint status: VIOLATED.
+- no pair above identity 0.3 on 'sequence' may cross folds: VIOLATED.
+```
+
+```json
+"cross_fold_pairs_at_or_above_threshold": 248,
+"max_cross_fold_similarity": 0.986,
+"nearest_reference_similarity": {"min": 0.877, "p50": 0.954, "max": 0.986},
+"nearest_neighbour_baseline": {"metric": "spearman", "value": 0.880675, "compared": 74}
+```
+
+**Every single held-out sequence has a training relative at 87.7% identity or better**,
+median 95.4%. That is the sentence to put in front of anyone defending a random split.
+
+Note the status is `satisfied_unproven` rather than `satisfied` when such a split comes
+back clean: MMseqs2 is sensitive but heuristic, so absence of a crossing pair is strong
+evidence and not a proof. cutsite says which it has.
+
 ## Auditing somebody else's split
 
 The fastest way to find out whether a benchmark means anything:
@@ -248,10 +283,20 @@ file telling an agent when to reach for it and how to read the result honestly.
 | `kmer_jaccard` | exact sparse Jaccard | core install | exact |
 | `kmer_jaccard` | MinHash LSH (large n) | core install | lower bound |
 | `tanimoto` | RDKit Morgan fingerprints | `cutsite[chem]` | exact |
-| `scaffold` | RDKit Bemis-Murcko | `cutsite[chem]` | exact |
+| `scaffold` | Murcko framework over RDKit | `cutsite[chem]` | exact |
 | `exact_duplicate` | normalised equality | core install | exact |
 
 Reads CSV, TSV, FASTA, and Parquet with `cutsite[parquet]`.
+
+The `scaffold` backend computes the Murcko framework itself — ring systems plus their
+linkers, with every exocyclic substituent removed — rather than calling RDKit's
+`MurckoScaffoldSmiles`, which is broken in RDKit 2026.09. It therefore groups slightly
+more molecules together than RDKit's variant does (a lactam shares a framework with its
+parent ring), which is the safe direction for a split.
+
+Numeric labels are stratified by quantile bucket rather than by raw value, and a label
+with more distinct values than a sensible class count is reported as not stratified
+rather than silently treated as thousands of classes.
 
 ## Scope
 

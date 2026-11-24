@@ -26,11 +26,48 @@ def _rdkit():
     try:
         from rdkit import Chem, RDLogger
         from rdkit.Chem import rdFingerprintGenerator
-        from rdkit.Chem.Scaffolds import MurckoScaffold as _Murcko
     except ModuleNotFoundError:
         return None
     RDLogger.DisableLog("rdApp.*")
-    return Chem, rdFingerprintGenerator, _Murcko
+    return Chem, rdFingerprintGenerator
+
+
+def murcko_framework(chemistry, molecule) -> Optional[str]:
+    """The ring systems and the linkers between them, as canonical SMILES.
+
+    Computed by repeatedly deleting terminal atoms that are not in a ring, which
+    leaves exactly the ring systems plus the paths joining them. Exocyclic
+    substituents go, including exocyclic double-bonded atoms, so a lactam and its
+    parent ring share a framework. That groups more molecules together than
+    RDKit's MurckoScaffoldSmiles does, which is the safe direction for a split.
+
+    Returns None for a molecule with no rings, which has no framework. It does
+    not catch toolkit failures: a split must not quietly lose a constraint
+    because a scaffold could not be computed.
+    """
+    editable = chemistry.RWMol(molecule)
+    chemistry.FastFindRings(editable)
+    while True:
+        victim = None
+        for atom in editable.GetAtoms():
+            if atom.GetDegree() <= 1 and not atom.IsInRing():
+                victim = atom.GetIdx()
+                break
+        if victim is None:
+            break
+        editable.RemoveAtom(victim)
+        chemistry.FastFindRings(editable)
+    if editable.GetNumAtoms() == 0:
+        return None
+    for atom in editable.GetAtoms():
+        atom.SetNoImplicit(False)
+        atom.SetNumExplicitHs(0)
+    framework = editable.GetMol()
+    try:
+        chemistry.SanitizeMol(framework)
+    except Exception:
+        return chemistry.MolToSmiles(framework)
+    return chemistry.MolToSmiles(framework)
 
 
 class _ChemBackend(SimilarityBackend):
@@ -60,7 +97,7 @@ class MorganTanimoto(_ChemBackend):
         self.bits = bits
 
     def _fingerprints(self, values: Sequence[Optional[str]]):
-        Chem, generators, _ = _rdkit()
+        Chem, generators = _rdkit()
         generator = generators.GetMorganGenerator(radius=self.radius, fpSize=self.bits)
         prints: List[Optional[object]] = []
         missing: List[int] = []
@@ -142,7 +179,7 @@ class MurckoScaffold(_ChemBackend):
     exactness = EXACT
 
     def _scaffolds(self, values: Sequence[Optional[str]]) -> Tuple[List[Optional[str]], List[int]]:
-        Chem, _generators, murcko = _rdkit()
+        Chem, _generators = _rdkit()
         out: List[Optional[str]] = []
         missing: List[int] = []
         for i, value in enumerate(values):
@@ -151,14 +188,9 @@ class MurckoScaffold(_ChemBackend):
                 out.append(None)
                 missing.append(i)
                 continue
-            try:
-                scaffold = murcko.MurckoScaffoldSmiles(mol=molecule, includeChirality=False)
-            except Exception:
-                out.append(None)
-                missing.append(i)
-                continue
-            out.append(scaffold or None)
-            if not scaffold:
+            framework = murcko_framework(Chem, molecule)
+            out.append(framework)
+            if framework is None:
                 missing.append(i)
         return out, missing
 
@@ -181,9 +213,15 @@ class MurckoScaffold(_ChemBackend):
                 for b_pos in range(a_pos + 1, len(members)):
                     collector.add(members[a_pos], members[b_pos], 1.0)
         pairs = collector.finish()
-        notes = ["molecules sharing a Bemis-Murcko scaffold are treated as one unit"]
+        notes = [
+            "molecules sharing a Murcko framework (ring systems plus their linkers, with all "
+            "exocyclic substituents removed) are treated as one unit"
+        ]
         if missing:
-            notes.append(f"{len(missing)} entities have no scaffold and are treated as unrelated")
+            notes.append(
+                f"{len(missing)} entities have no ring system, so no framework, and are treated "
+                "as unrelated"
+            )
         return SimilarityResult(
             backend=self.name,
             backend_version=self.version(),

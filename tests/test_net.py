@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "tools" / "no_unbounded_pairs.py"
 
 DENSE_VALUES = ["ACDEFGHIKLMNPQRSTVWY" * 8] * 60
+DENSE_MOLECULES = ["c1ccc(C2=NCCNc3ccccc32)cc1"] * 60
+MOLECULE_METRICS = {"tanimoto", "scaffold"}
 
 
 def _run_checker(root: Path) -> subprocess.CompletedProcess:
@@ -63,9 +65,12 @@ def test_every_registered_backend_charges_the_pair_budget(name: str):
     backend = backend_table()[name]()
     if not backend.available():
         pytest.skip(f"{name} is not installed on this machine")
-    values = DENSE_VALUES if backend.metric != "molecule" else ["CCO"] * 60
+    molecular = backend.metric in MOLECULE_METRICS
+    values = DENSE_MOLECULES if molecular else DENSE_VALUES
+    kind = "molecule" if molecular else "protein"
+    threshold = 1.0 if backend.metric == "scaffold" else 0.05
     with pytest.raises(TooManyPairs) as error:
-        backend.pairs_above(values, "protein", 0.05, max_pairs=5)
+        backend.pairs_above(values, kind, threshold, max_pairs=5)
     assert error.value.details["backend"] == backend.name
     assert error.value.details["max_pairs"] == 5
 

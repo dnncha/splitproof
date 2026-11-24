@@ -11,7 +11,6 @@ from .units import Unit, UnitGraph
 
 DROPPED = "__dropped__"
 MAX_FOLDS = 1000
-LABEL_WEIGHT = 0.25
 
 
 @dataclass
@@ -132,8 +131,9 @@ def assign(policy: Policy, graph: UnitGraph, *, tolerance: float = 0.1) -> Assig
                 },
             )
 
+    shares = _label_shares(graph.units)
     for unit in sorted(floating, key=lambda u: (-u.size, _tiebreak(policy.seed, u))):
-        choice = _best_fold(unit, fold_names, targets, counts, label_counts)
+        choice = _best_fold(unit, fold_names, targets, counts, label_counts, shares)
         _place(unit, choice, fold_of, counts, unit_counts, label_counts)
 
     empty = [name for name in fold_names if counts[name] == 0]
@@ -176,27 +176,42 @@ def _place(
         label_counts[fold][label] = label_counts[fold].get(label, 0) + amount
 
 
+def _label_shares(units: Sequence[Unit]) -> Dict[str, float]:
+    totals: Dict[str, int] = {}
+    for unit in units:
+        for label, amount in unit.label_counts.items():
+            totals[label] = totals.get(label, 0) + amount
+    overall = sum(totals.values())
+    if not overall:
+        return {}
+    return {label: amount / overall for label, amount in totals.items()}
+
+
 def _best_fold(
     unit: Unit,
     fold_names: Sequence[str],
     targets: Dict[str, int],
     counts: Dict[str, int],
     label_counts: Dict[str, Dict[str, int]],
+    shares: Dict[str, float],
 ) -> str:
     best_name = fold_names[0]
     best_score = None
-    for name in fold_names:
-        target = max(targets[name], 1)
-        occupancy = (counts[name] + unit.size) / target
-        penalty = 0.0
-        if unit.label_counts:
-            for label, amount in unit.label_counts.items():
-                current = label_counts[name].get(label, 0)
-                penalty += (current + amount) / target
-            penalty /= len(unit.label_counts)
-        score = occupancy + LABEL_WEIGHT * penalty
-        if best_score is None or score < best_score - 1e-12:
-            best_score, best_name = score, name
+    for candidate in fold_names:
+        size_cost = 0.0
+        for name in fold_names:
+            target = max(targets[name], 1)
+            placed = counts[name] + (unit.size if name == candidate else 0)
+            size_cost += ((placed - targets[name]) / target) ** 2
+        drift = 0.0
+        if shares:
+            target = max(targets[candidate], 1)
+            for label, share in shares.items():
+                placed = label_counts[candidate].get(label, 0) + unit.label_counts.get(label, 0)
+                drift += abs(placed / target - share)
+        score = (round(size_cost, 9), round(drift, 9), candidate)
+        if best_score is None or score < best_score:
+            best_score, best_name = score, candidate
     return best_name
 
 
