@@ -62,3 +62,8 @@ warn_unused_ignores = true
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "datetime.date.fromisoformat".msg = "accepts different formats on Python 3.10 and 3.11+; use splitproof.isodate.calendar_day"
 "datetime.datetime.fromisoformat".msg = "accepts different formats on Python 3.10 and 3.11+; use splitproof.isodate.calendar_day"
+
+[tool.mutmut]
+paths_to_mutate = ["src/splitproof/evaluate.py", "src/splitproof/assign.py", "src/splitproof/cert.py"]
+tests_dir = ["tests/"]
+also_copy = ["tools/", "examples/", "scripts/"]
