@@ -1,0 +1,190 @@
+{
+  "assignment": {
+    "digest": "sha256:bf38f87a2c2d6d40544adff5d096212c4f07bcad82efd6ebd4d6f25f0e4478d7",
+    "dropped": 0,
+    "folds": [
+      "test",
+      "train"
+    ],
+    "stats": [
+      {
+        "count": 42,
+        "drift": -0.125,
+        "labels": {
+          "q2": 7,
+          "q3": 35
+        },
+        "name": "test",
+        "target": 48,
+        "units": 1
+      },
+      {
+        "count": 198,
+        "drift": 0.03125,
+        "labels": {
+          "q0": 60,
+          "q1": 60,
+          "q2": 53,
+          "q3": 25
+        },
+        "name": "train",
+        "target": 192,
+        "units": 5
+      }
+    ]
+  },
+  "constraints": [
+    {
+      "description": "no pair above kmer_jaccard 0.4 on 'sequence' may cross folds",
+      "examples": [],
+      "id": "sequence:kmer_jaccard@0.4",
+      "kind": "similarity",
+      "measured": {
+        "backend": "exact_jaccard",
+        "cross_fold_pairs_at_or_above_threshold": 0,
+        "exactness": "exact",
+        "max_cross_fold_similarity": null,
+        "pairs_at_or_above_threshold": 500
+      },
+      "notes": [],
+      "status": "satisfied"
+    },
+    {
+      "description": "no value of 'donor_id' may appear in more than one fold",
+      "examples": [],
+      "id": "disjoint:donor_id",
+      "kind": "disjoint",
+      "measured": {
+        "distinct_values": 6,
+        "missing_values": 0,
+        "values_in_more_than_one_fold": 0
+      },
+      "notes": [],
+      "status": "satisfied"
+    }
+  ],
+  "created": "2026-11-24T02:04:43+00:00",
+  "cutsite": {
+    "schema": 1,
+    "version": "0.1.0"
+  },
+  "dataset": {
+    "digest": "sha256:ee6f7f5294593cba55ebed4fcd8a33de0ace7ea96e04d8001628072889fb205b",
+    "entities": 240,
+    "id_column": "accession",
+    "path": "proteins.csv"
+  },
+  "diagnostics": {
+    "keys": {
+      "sequence:kmer_jaccard@0.4": {
+        "at_or_above_threshold": 0,
+        "backend": "exact_jaccard",
+        "metric": "kmer_jaccard",
+        "nearest_neighbour_baseline": {
+          "compared": 31,
+          "metric": "spearman",
+          "note": "a nearest-neighbour copy of the reference fold scores this much; a model that does not clearly beat it has learned nothing beyond similarity",
+          "value": -0.00264
+        },
+        "nearest_reference_similarity": {
+          "max": 0.00232,
+          "mean": 0.00232,
+          "min": 0.00232,
+          "p50": 0.00232,
+          "p90": 0.00232,
+          "p99": 0.00232
+        },
+        "queries": 42,
+        "threshold": 0.4,
+        "with_a_neighbour": 31
+      }
+    },
+    "reference_fold": "train"
+  },
+  "environment": {
+    "platform": "darwin",
+    "python": "3.13.15"
+  },
+  "policy": {
+    "constraints": [
+      {
+        "key": "sequence",
+        "kind": "similarity",
+        "metric": "kmer_jaccard",
+        "threshold": 0.4
+      },
+      {
+        "key": "donor_id",
+        "kind": "disjoint"
+      }
+    ],
+    "cutsite": 1,
+    "dataset": {
+      "dates": {
+        "deposited": "deposited"
+      },
+      "groups": [
+        "donor_id"
+      ],
+      "id": "accession",
+      "label": "activity",
+      "label_kind": "auto",
+      "similarity": {
+        "sequence": {
+          "column": "sequence",
+          "kind": "protein",
+          "name": "sequence"
+        }
+      }
+    },
+    "scheme": {
+      "fractions": {
+        "test": 0.2,
+        "train": 0.8
+      },
+      "kind": "holdout"
+    },
+    "seed": 7
+  },
+  "policy_digest": "sha256:8aac50768045d463a6892285f82a76cf561b25079163ea1e638a1c685397e109",
+  "seed": 7,
+  "status": "satisfied",
+  "units": {
+    "dropped_entities": 0,
+    "entities": 240,
+    "exactness": "exact",
+    "largest_unit": 42,
+    "largest_unit_fraction": 0.175,
+    "merges": {
+      "disjoint:donor_id": 34,
+      "sequence:kmer_jaccard@0.4": 200
+    },
+    "pinned_units": 0,
+    "similarity": {
+      "sequence:kmer_jaccard@0.4": {
+        "backend": "exact_jaccard",
+        "backend_version": "scipy-1.18.1",
+        "edges": 500,
+        "exactness": "exact",
+        "metric": "kmer_jaccard",
+        "missing_values": 0,
+        "notes": [],
+        "params": {
+          "k": 5,
+          "vocabulary": 17853
+        },
+        "threshold": 0.4
+      }
+    },
+    "singleton_units": 0,
+    "size_percentiles": {
+      "max": 42,
+      "p50": 42,
+      "p90": 42,
+      "p99": 42
+    },
+    "spanning_units": 0,
+    "stratify": "numeric, 4 quantile buckets",
+    "units": 6
+  }
+}

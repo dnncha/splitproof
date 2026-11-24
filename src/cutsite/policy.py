@@ -32,6 +32,77 @@ def _require(mapping: Dict[str, Any], key: str, where: str) -> Any:
     return mapping[key]
 
 
+def _as_int(value: Any, where: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise PolicyError(
+            f"{where} must be a whole number, got {type(value).__name__}",
+            details={"where": where, "value": str(value)},
+        )
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise PolicyError(
+            f"{where} must be a whole number, got {value!r}",
+            details={"where": where, "value": str(value)},
+        ) from exc
+
+
+def _as_float(value: Any, where: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise PolicyError(
+            f"{where} must be a number, got {type(value).__name__}",
+            details={"where": where, "value": str(value)},
+        )
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise PolicyError(
+            f"{where} must be a number, got {value!r}",
+            details={"where": where, "value": str(value)},
+        ) from exc
+    if number != number or number in {float("inf"), float("-inf")}:
+        raise PolicyError(
+            f"{where} must be a finite number, got {value!r}",
+            details={"where": where, "value": str(value)},
+        )
+    return number
+
+
+def _as_text(value: Any, where: str) -> str:
+    if value is None or isinstance(value, (dict, list, tuple, set, bool)):
+        raise PolicyError(
+            f"{where} must be a name, got {type(value).__name__}",
+            details={"where": where, "value": str(value)},
+        )
+    text = str(value).strip()
+    if not text:
+        raise PolicyError(
+            f"{where} must not be empty",
+            details={"where": where},
+        )
+    return text
+
+
+def _as_mapping(value: Any, where: str) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        raise PolicyError(
+            f"{where} must be a mapping, got {type(value).__name__}",
+            details={"where": where, "value": str(value)},
+        )
+    return value
+
+
+def _as_list(value: Any, where: str) -> List[Any]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    raise PolicyError(
+        f"{where} must be a list, got {type(value).__name__}",
+        details={"where": where, "value": str(value)},
+    )
+
+
 def _as_date(value: Any, where: str) -> _dt.date:
     if isinstance(value, _dt.datetime):
         return value.date()
@@ -58,15 +129,15 @@ class SimilarityKey:
         where = f"dataset.similarity.{name}"
         if isinstance(raw, str):
             raw = {"column": raw}
-        if not isinstance(raw, dict):
-            raise PolicyError(f"{where} must be a column name or a mapping", details={"where": where})
-        kind = str(raw.get("kind", "protein"))
+        raw = _as_mapping(raw, where)
+        kind = _as_text(raw.get("kind", "protein"), f"{where}.kind")
         if kind not in KEY_KINDS:
             raise PolicyError(
                 f"{where}.kind must be one of {sorted(KEY_KINDS)}, got {kind!r}",
                 details={"where": where, "value": kind},
             )
-        return SimilarityKey(name=name, column=str(_require(raw, "column", where)), kind=kind)
+        column = _as_text(_require(raw, "column", where), f"{where}.column")
+        return SimilarityKey(name=name, column=column, kind=kind)
 
     def to_dict(self) -> Dict[str, Any]:
         return {"name": self.name, "column": self.column, "kind": self.kind}
@@ -158,11 +229,10 @@ class Scheme:
         where = "scheme"
         if raw is None:
             return Scheme(kind="holdout", fractions={"train": 0.8, "test": 0.2})
-        if not isinstance(raw, dict):
-            raise PolicyError("scheme must be a mapping", details={"where": where})
-        kind = str(raw.get("kind", "holdout"))
+        raw = _as_mapping(raw, where)
+        kind = _as_text(raw.get("kind", "holdout"), f"{where}.kind")
         if kind == "kfold":
-            folds = int(raw.get("folds", 5))
+            folds = _as_int(raw.get("folds", 5), f"{where}.folds")
             if folds < 2:
                 raise PolicyError("scheme.folds must be at least 2", details={"where": where, "value": folds})
             return Scheme(kind=kind, folds=folds)
@@ -173,13 +243,18 @@ class Scheme:
                 f"scheme.kind must be holdout, kfold or leave-unit-out, got {kind!r}",
                 details={"where": where, "value": kind},
             )
-        fractions_raw = raw.get("fractions") or {"train": 0.8, "test": 0.2}
-        if not isinstance(fractions_raw, dict) or len(fractions_raw) < 2:
+        fractions_raw = _as_mapping(
+            raw.get("fractions") or {"train": 0.8, "test": 0.2}, f"{where}.fractions"
+        )
+        if len(fractions_raw) < 2:
             raise PolicyError(
                 "scheme.fractions must map at least two fold names to fractions",
                 details={"where": f"{where}.fractions"},
             )
-        fractions = {str(k): float(v) for k, v in fractions_raw.items()}
+        fractions = {
+            _as_text(k, f"{where}.fractions"): _as_float(v, f"{where}.fractions.{k}")
+            for k, v in fractions_raw.items()
+        }
         for name, value in fractions.items():
             if value <= 0:
                 raise PolicyError(
@@ -215,31 +290,30 @@ class DatasetSpec:
     @staticmethod
     def parse(raw: Any) -> "DatasetSpec":
         where = "dataset"
-        if not isinstance(raw, dict):
-            raise PolicyError("dataset must be a mapping", details={"where": where})
-        similarity_raw = raw.get("similarity") or {}
-        if not isinstance(similarity_raw, dict):
-            raise PolicyError("dataset.similarity must be a mapping", details={"where": f"{where}.similarity"})
-        groups_raw = raw.get("groups") or []
-        if isinstance(groups_raw, str):
-            groups_raw = [groups_raw]
-        dates_raw = raw.get("dates") or {}
-        if isinstance(dates_raw, str):
-            dates_raw = {dates_raw: dates_raw}
-        label_kind = str(raw.get("label_kind", "auto"))
+        raw = _as_mapping(raw, where)
+        similarity_raw = _as_mapping(raw.get("similarity") or {}, f"{where}.similarity")
+        groups_raw = _as_list(raw.get("groups") or [], f"{where}.groups")
+        dates_value = raw.get("dates") or {}
+        if isinstance(dates_value, str):
+            dates_value = {dates_value: dates_value}
+        dates_raw = _as_mapping(dates_value, f"{where}.dates")
+        label_kind = _as_text(raw.get("label_kind", "auto"), f"{where}.label_kind")
         if label_kind not in {"auto", "categorical", "numeric"}:
             raise PolicyError(
                 "dataset.label_kind must be auto, categorical or numeric",
                 details={"where": f"{where}.label_kind", "value": label_kind},
             )
         return DatasetSpec(
-            path=str(raw["path"]) if raw.get("path") else None,
-            id_column=str(_require(raw, "id", where)),
-            label_column=str(raw["label"]) if raw.get("label") else None,
+            path=_as_text(raw["path"], f"{where}.path") if raw.get("path") else None,
+            id_column=_as_text(_require(raw, "id", where), f"{where}.id"),
+            label_column=_as_text(raw["label"], f"{where}.label") if raw.get("label") else None,
             label_kind=label_kind,
             similarity={name: SimilarityKey.parse(name, value) for name, value in similarity_raw.items()},
-            groups=[str(g) for g in groups_raw],
-            dates={str(k): str(v) for k, v in dates_raw.items()},
+            groups=[_as_text(g, f"{where}.groups") for g in groups_raw],
+            dates={
+                _as_text(k, f"{where}.dates"): _as_text(v, f"{where}.dates.{k}")
+                for k, v in dates_raw.items()
+            },
         )
 
 
@@ -277,7 +351,7 @@ class Policy:
     def from_dict(raw: Dict[str, Any], *, source_path: Optional[Path] = None) -> "Policy":
         if not isinstance(raw, dict):
             raise PolicyError("policy must be a mapping at the top level")
-        version = int(raw.get("cutsite", POLICY_VERSION))
+        version = _as_int(raw.get("cutsite", POLICY_VERSION), "policy.cutsite")
         if version != POLICY_VERSION:
             raise PolicyError(
                 f"policy version {version} is not supported by this cutsite build",
@@ -292,7 +366,7 @@ class Policy:
                 "policy declares no constraints, so it would prove nothing",
                 remedy="Add at least one similarity, disjoint or temporal constraint.",
             )
-        seed = int(raw.get("seed", 7))
+        seed = _as_int(raw.get("seed", 7), "policy.seed")
         return Policy(
             version=version,
             dataset=dataset,
@@ -333,13 +407,12 @@ def _parse_constraints(raw: Any, dataset: DatasetSpec) -> List[Constraint]:
     out: List[Constraint] = []
     for index, item in enumerate(raw):
         where = f"constraints[{index}]"
-        if not isinstance(item, dict):
-            raise PolicyError(f"{where} must be a mapping", details={"where": where})
-        kind = str(_require(item, "kind", where))
+        item = _as_mapping(item, where)
+        kind = _as_text(_require(item, "kind", where), f"{where}.kind")
         if kind == "similarity":
             out.append(_parse_similarity(item, where, dataset))
         elif kind == "disjoint":
-            key = str(_require(item, "key", where))
+            key = _as_text(_require(item, "key", where), f"{where}.key")
             if key not in dataset.groups:
                 raise PolicyError(
                     f"{where} references group '{key}' which is not listed in dataset.groups",
@@ -358,14 +431,14 @@ def _parse_constraints(raw: Any, dataset: DatasetSpec) -> List[Constraint]:
 
 
 def _parse_similarity(item: Dict[str, Any], where: str, dataset: DatasetSpec) -> SimilarityConstraint:
-    key = str(_require(item, "key", where))
+    key = _as_text(_require(item, "key", where), f"{where}.key")
     if key not in dataset.similarity:
         raise PolicyError(
             f"{where} references similarity key '{key}' which is not declared in dataset.similarity",
             remedy=f"Declare '{key}' under dataset.similarity.",
             details={"where": where, "key": key, "known": sorted(dataset.similarity)},
         )
-    metric = str(_require(item, "metric", where))
+    metric = _as_text(_require(item, "metric", where), f"{where}.metric")
     if metric not in SIMILARITY_METRICS:
         raise PolicyError(
             f"{where}.metric must be one of {sorted(SIMILARITY_METRICS)}, got {metric!r}",
@@ -379,18 +452,18 @@ def _parse_similarity(item: Dict[str, Any], where: str, dataset: DatasetSpec) ->
             remedy=f"Metric '{metric}' applies to {sorted(SIMILARITY_METRICS[metric])} keys.",
             details={"where": where, "metric": metric, "key_kind": kind},
         )
-    threshold = float(_require(item, "threshold", where))
+    threshold = _as_float(_require(item, "threshold", where), f"{where}.threshold")
     if not 0.0 < threshold <= 1.0:
         raise PolicyError(
             f"{where}.threshold must be in (0, 1], got {threshold}",
             details={"where": where, "value": threshold},
         )
-    backend = str(item["backend"]) if item.get("backend") else None
+    backend = _as_text(item["backend"], f"{where}.backend") if item.get("backend") else None
     return SimilarityConstraint(key=key, metric=metric, threshold=threshold, backend=backend)
 
 
 def _parse_temporal(item: Dict[str, Any], where: str, dataset: DatasetSpec) -> TemporalConstraint:
-    key = str(_require(item, "key", where))
+    key = _as_text(_require(item, "key", where), f"{where}.key")
     if key not in dataset.dates:
         raise PolicyError(
             f"{where} references date '{key}' which is not listed in dataset.dates",
@@ -398,14 +471,14 @@ def _parse_temporal(item: Dict[str, Any], where: str, dataset: DatasetSpec) -> T
             details={"where": where, "key": key, "known": sorted(dataset.dates)},
         )
     cutoff = _as_date(_require(item, "cutoff", where), f"{where}.cutoff")
-    before = str(item.get("before", "train"))
-    after = str(item.get("after", "test"))
+    before = _as_text(item.get("before", "train"), f"{where}.before")
+    after = _as_text(item.get("after", "test"), f"{where}.after")
     if before == after:
         raise PolicyError(
             f"{where}.before and {where}.after must name different folds",
             details={"where": where, "value": before},
         )
-    on_span = str(item.get("on_span", "test"))
+    on_span = _as_text(item.get("on_span", "test"), f"{where}.on_span")
     if on_span not in SPAN_ACTIONS:
         raise PolicyError(
             f"{where}.on_span must be one of {sorted(SPAN_ACTIONS)}, got {on_span!r}",
