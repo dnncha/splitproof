@@ -310,4 +310,5 @@ v0.1.0 ([CHANGELOG.md](CHANGELOG.md)). Policy schema (`splitproof: 1`) and certi
 - Citation metadata: [CITATION.cff](CITATION.cff)
 - Security and threat model: [SECURITY.md](SECURITY.md)
 - Website: [dnncha.github.io/splitproof](https://dnncha.github.io/splitproof/)
+- Part of [Bunsen](https://bunsen.science/), scientific software from Ireland
 - License: [Apache-2.0](LICENSE)
