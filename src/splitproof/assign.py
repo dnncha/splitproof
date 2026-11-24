@@ -125,10 +125,8 @@ def assign(policy: Policy, graph: UnitGraph, *, tolerance: float = 0.1) -> Assig
         placement[position] = choice
         _place(unit, choice, fold_of, counts, unit_counts, label_counts)
 
-    _fill_empty_folds(
-        fold_names, ordered, placement, fold_of, counts, unit_counts, label_counts
-    )
-    _improve(fold_names, ordered, placement, fold_of, counts, unit_counts, label_counts, targets)
+    _fill_empty_folds(fold_names, ordered, placement, fold_of, counts, unit_counts)
+    _improve(fold_names, ordered, placement, fold_of, counts, unit_counts, targets)
 
     empty = [name for name in fold_names if counts[name] == 0]
     if empty:
@@ -148,17 +146,7 @@ def assign(policy: Policy, graph: UnitGraph, *, tolerance: float = 0.1) -> Assig
             },
         )
 
-    stats = [
-        FoldStat(
-            name=name,
-            target=targets[name],
-            count=counts[name],
-            units=unit_counts[name],
-            label_counts=label_counts[name],
-        )
-        for name in fold_names
-    ]
-    return Assignment(fold_of=fold_of, folds=list(fold_names), stats=stats, dropped=list(graph.dropped))
+    return Assignment(fold_of=fold_of, folds=list(fold_names), stats=[], dropped=list(graph.dropped))
 
 
 def _fill_empty_folds(
@@ -168,7 +156,6 @@ def _fill_empty_folds(
     fold_of: Dict[int, str],
     counts: Dict[str, int],
     unit_counts: Dict[str, int],
-    label_counts: Dict[str, Dict[str, int]],
 ) -> None:
     """Move units into folds the greedy pass left empty.
 
@@ -188,7 +175,7 @@ def _fill_empty_folds(
         if not donors:
             return
         choice = min(donors, key=lambda position: (ordered[position].size, placement[position]))
-        _relocate(choice, name, ordered, placement, fold_of, counts, unit_counts, label_counts)
+        _relocate(choice, name, ordered, placement, fold_of, counts, unit_counts)
 
 
 def _relocate(
@@ -199,7 +186,6 @@ def _relocate(
     fold_of: Dict[int, str],
     counts: Dict[str, int],
     unit_counts: Dict[str, int],
-    label_counts: Dict[str, Dict[str, int]],
 ) -> None:
     unit = ordered[position]
     source = placement[position]
@@ -209,11 +195,6 @@ def _relocate(
     unit_counts[source] -= 1
     counts[destination] += unit.size
     unit_counts[destination] += 1
-    for label, amount in unit.label_counts.items():
-        label_counts[source][label] = label_counts[source].get(label, 0) - amount
-        if label_counts[source][label] == 0:
-            del label_counts[source][label]
-        label_counts[destination][label] = label_counts[destination].get(label, 0) + amount
     placement[position] = destination
 
 
@@ -252,7 +233,6 @@ def _improve(
     fold_of: Dict[int, str],
     counts: Dict[str, int],
     unit_counts: Dict[str, int],
-    label_counts: Dict[str, Dict[str, int]],
     targets: Dict[str, int],
 ) -> None:
     """Exchange small bundles of floating units while that strictly improves fold sizes.
@@ -305,9 +285,9 @@ def _improve(
         if not out_positions and not in_positions:
             return
         for position in out_positions:
-            _relocate(position, second, ordered, placement, fold_of, counts, unit_counts, label_counts)
+            _relocate(position, second, ordered, placement, fold_of, counts, unit_counts)
         for position in in_positions:
-            _relocate(position, first, ordered, placement, fold_of, counts, unit_counts, label_counts)
+            _relocate(position, first, ordered, placement, fold_of, counts, unit_counts)
 
 
 def _place(
