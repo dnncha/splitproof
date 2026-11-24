@@ -30,6 +30,12 @@ def summary(certificate: Dict[str, Any]) -> str:
             f"Worst held-out similarity to the reference fold: {value} on {key} "
             f"({with_neighbour} of {queries} held-out items have any neighbour)."
         )
+    unconstrained = _unconstrained(certificate)
+    if unconstrained:
+        lines.append(
+            f"{unconstrained} entities had no usable value for a declared key, so no constraint "
+            "binds them. They are in a fold but unconstrained."
+        )
     if status != VIOLATED:
         lines.append(
             "That status covers only the constraints the policy declared. Read the numbers below "
@@ -58,6 +64,14 @@ def summary(certificate: Dict[str, Any]) -> str:
                 f"p99 {distribution.get('p99')}, max {distribution.get('max')}."
             )
     return "\n".join(lines)
+
+
+def _unconstrained(certificate: Dict[str, Any]) -> int:
+    total = 0
+    for item in certificate.get("constraints", []):
+        measured = item.get("measured") or {}
+        total = max(total, int(measured.get("values_absent") or 0) + int(measured.get("values_unparsable") or 0))
+    return total
 
 
 def _worst_neighbour(certificate: Dict[str, Any]):

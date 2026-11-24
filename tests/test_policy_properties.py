@@ -142,20 +142,38 @@ def test_only_thresholds_in_the_unit_interval_are_accepted(threshold):
 @given(
     st.dictionaries(
         names,
-        st.floats(min_value=0.01, max_value=100.0, allow_nan=False, allow_infinity=False),
+        st.floats(min_value=1.0, max_value=100.0, allow_nan=False, allow_infinity=False),
         min_size=2,
         max_size=4,
     )
 )
-def test_any_positive_fractions_are_normalised_to_one(fractions):
+def test_weights_of_one_or_more_are_normalised_to_one(fractions):
     payload = copy.deepcopy(BASE)
     payload["scheme"] = {"kind": "holdout", "fractions": fractions}
-    payload["constraints"] = [
-        {"kind": "similarity", "key": "sequence", "metric": "kmer_jaccard", "threshold": 0.3}
-    ]
     policy = Policy.from_dict(payload)
     assert sum(policy.scheme.fractions.values()) == pytest.approx(1.0)
     assert set(policy.scheme.fractions) == {str(name) for name in fractions}
+
+
+@SETTINGS
+@given(
+    st.dictionaries(
+        names,
+        st.floats(min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False),
+        min_size=2,
+        max_size=4,
+    )
+)
+def test_fraction_like_values_must_actually_sum_to_one(fractions):
+    payload = copy.deepcopy(BASE)
+    payload["scheme"] = {"kind": "holdout", "fractions": fractions}
+    total = sum(fractions.values())
+    if abs(total - 1.0) <= 1e-6:
+        assert Policy.from_dict(payload).scheme.fractions
+        return
+    with pytest.raises(PolicyError) as error:
+        Policy.from_dict(payload)
+    assert "sum to" in error.value.message
 
 
 @SETTINGS

@@ -109,7 +109,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--tolerance",
         type=float,
         default=api.DEFAULT_TOLERANCE,
-        help="how far a fold may exceed its requested size before the split is called infeasible",
+        help=(
+            "how far the largest unit may exceed a fold's requested size before the split is "
+            "refused as infeasible; final fold drift is reported, never refused"
+        ),
     )
     split.set_defaults(handler=_cmd_split)
 
@@ -403,10 +406,15 @@ def _cmd_init(args: argparse.Namespace) -> int:
     for group in groups:
         constraints.append({"kind": "disjoint", "key": group})
     if not constraints:
-        constraints.append(
-            {"kind": "similarity", "key": "sequence", "metric": "kmer_jaccard", "threshold": 0.5}
+        raise CutsiteError(
+            "could not recognise a sequence, molecule, group or date column to constrain",
+            remedy=(
+                "cutsite will not invent a constraint. Write the policy by hand: declare the "
+                "column under dataset.similarity or dataset.groups, then add the constraint that "
+                "matches your claim. See the README for a worked policy."
+            ),
+            details={"columns": sorted(data.columns), "id": header_id},
         )
-        similarity.setdefault("sequence", {"column": header_id, "kind": "protein"})
 
     policy: Dict[str, Any] = {
         "cutsite": 1,

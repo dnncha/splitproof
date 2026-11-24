@@ -92,14 +92,16 @@ def test_a_partly_unparsable_column_surfaces_the_count(tmp_path: Path):
 
 def test_scaffold_groups_a_shared_core():
     result = MurckoScaffold().pairs_above(BENZODIAZEPINES, "molecule", 1.0)
-    assert len(result.pairs) == 3
-    assert all(similarity == 1.0 for _l, _r, similarity in result.pairs)
+    assert result.groups is not None
+    assert len(set(result.groups)) == 1
+    assert len(result.pairs) == 0
 
 
 def test_scaffold_keeps_different_cores_apart():
     result = MurckoScaffold().pairs_above(BENZODIAZEPINES + PYRIDINES, "molecule", 1.0)
-    for left, right, _similarity in result.pairs:
-        assert (left < 3) == (right < 3)
+    assert result.groups[:3] == [result.groups[0]] * 3
+    assert result.groups[3:] == [result.groups[3]] * 3
+    assert result.groups[0] != result.groups[3]
 
 
 def test_tanimoto_nearest_finds_the_closest_analogue():
@@ -132,12 +134,13 @@ def test_a_scaffold_leak_is_caught(tmp_path: Path):
     assert outcome.reports[0].status == VIOLATED
 
 
-def test_chem_backends_charge_the_pair_budget():
+def test_tanimoto_charges_the_pair_budget_but_scaffold_needs_no_pairs():
     values = BENZODIAZEPINES * 8
     with pytest.raises(TooManyPairs):
         MorganTanimoto().pairs_above(values, "molecule", 0.1, max_pairs=5)
-    with pytest.raises(TooManyPairs):
-        MurckoScaffold().pairs_above(values, "molecule", 1.0, max_pairs=5)
+    classes = MurckoScaffold().pairs_above(values, "molecule", 1.0, max_pairs=5)
+    assert len(classes.pairs) == 0
+    assert classes.groups is not None
 
 
 def test_an_acyclic_only_dataset_refuses_rather_than_passing_vacuously(tmp_path: Path):
@@ -165,3 +168,21 @@ def test_framework_is_none_for_a_molecule_with_no_rings():
     from cutsite.sim.chem import murcko_framework
 
     assert murcko_framework(Chem, Chem.MolFromSmiles("CCCC")) is None
+
+
+def test_unparsable_input_downgrades_proven_to_unproven(tmp_path: Path):
+    path = tmp_path / "mixed.csv"
+    lines = ["id,smiles,series,activity"]
+    for position, smiles in enumerate(BENZODIAZEPINES):
+        lines.append(f"b{position},{smiles},bzd,{position}")
+    for position, smiles in enumerate(PYRIDINES):
+        lines.append(f"p{position},{smiles},pyr,{position}")
+    for position in range(3):
+        lines.append(f"junk{position},@@@not-a-molecule@@@,junk,{position}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    outcome = api.make_split(Policy.from_dict(_policy(path, "tanimoto", 0.5)))
+    report = outcome.reports[0]
+    assert report.measured["values_unparsable"] == 3
+    assert report.status == "satisfied_unproven"
+    assert any("compared to nothing" in note for note in report.notes)
+    assert outcome.certificate["status"] == "satisfied_unproven"

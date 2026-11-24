@@ -23,6 +23,7 @@ class ExactDuplicate(SimilarityBackend):
     name = "exact_duplicate"
     metric = "exact_duplicate"
     exactness = EXACT
+    emits = "classes"
 
     def version(self) -> str:
         return "builtin-1"
@@ -45,13 +46,14 @@ class ExactDuplicate(SimilarityBackend):
                 missing.append(i)
                 continue
             buckets.setdefault(_normalise(value), []).append(i)
-        collector = PairCollector(self.name, threshold, max_pairs)
-        for members in buckets.values():
-            for a_pos in range(len(members)):
-                for b_pos in range(a_pos + 1, len(members)):
-                    collector.add(members[a_pos], members[b_pos], 1.0)
-        pairs = collector.finish()
-        notes = ["compares whitespace-stripped, upper-cased values for exact equality"]
+        groups: List[Optional[str]] = [None] * len(values)
+        for label, members in buckets.items():
+            for member in members:
+                groups[member] = label
+        notes = [
+            "compares whitespace-stripped, upper-cased values for exact equality; equal values "
+            "form an equivalence class, so no pairwise edge list is ever built"
+        ]
         if missing:
             notes.append(f"{len(missing)} entities have no value for this key and are treated as unrelated")
         return SimilarityResult(
@@ -60,7 +62,7 @@ class ExactDuplicate(SimilarityBackend):
             metric=self.metric,
             exactness=EXACT,
             threshold=threshold,
-            pairs=pairs,
+            groups=groups,
             missing=missing,
             notes=notes,
             params={"distinct_values": len(buckets)},

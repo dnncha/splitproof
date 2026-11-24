@@ -15,6 +15,7 @@ from . import (
     SimilarityBackend,
     SimilarityResult,
     PairCollector,
+    guard_pair_budget,
     register,
 )
 
@@ -60,7 +61,14 @@ def _collect(backend: str, threshold: float, max_pairs: int, triples) -> PairSet
     return collector.finish()
 
 
-def parse_search_tsv(text: str, id_to_index: Dict[str, int]) -> List[Tuple[int, int, float]]:
+def parse_search_tsv(
+    text: str,
+    id_to_index: Dict[str, int],
+    *,
+    max_pairs: int = DEFAULT_MAX_PAIRS,
+    backend: str = "mmseqs2",
+    threshold: float = 0.0,
+) -> List[Tuple[int, int, float]]:
     pairs: Dict[Tuple[int, int], float] = {}
     for line in text.splitlines():
         line = line.strip()
@@ -82,6 +90,8 @@ def parse_search_tsv(text: str, id_to_index: Dict[str, int]) -> List[Tuple[int, 
         if identity > 1.0:
             identity = identity / 100.0
         key = (left, right) if left < right else (right, left)
+        if key not in pairs:
+            guard_pair_budget(len(pairs) + 1, max_pairs, backend, threshold)
         if identity > pairs.get(key, -1.0):
             pairs[key] = identity
     return [(a, b, value) for (a, b), value in sorted(pairs.items())]
@@ -189,7 +199,13 @@ class MMseqs2Identity(SimilarityBackend):
                 self._write_fasta(fasta, values, present)
                 _run(self.command(fasta, fasta, out, root / "tmp", threshold), self.name)
                 id_to_index = {f"s{i}": i for i in present}
-                triples = parse_search_tsv(out.read_text(encoding="utf-8"), id_to_index)
+                triples = parse_search_tsv(
+                    out.read_text(encoding="utf-8"),
+                    id_to_index,
+                    max_pairs=max_pairs,
+                    backend=self.name,
+                    threshold=threshold,
+                )
         return SimilarityResult(
             backend=self.name,
             backend_version=self.version(),

@@ -270,6 +270,15 @@ class Scheme:
                 )
         total = sum(fractions.values())
         if abs(total - 1.0) > 1e-6:
+            if all(value < 1.0 for value in fractions.values()):
+                raise PolicyError(
+                    f"scheme.fractions look like fractions but sum to {total:g}, not 1",
+                    remedy=(
+                        "Make them sum to 1, or express them as weights greater than 1 "
+                        "(for example 8 and 2) if you meant a ratio."
+                    ),
+                    details={"where": f"{where}.fractions", "sum": total},
+                )
             fractions = {k: v / total for k, v in fractions.items()}
         return Scheme(kind=kind, fractions=fractions)
 

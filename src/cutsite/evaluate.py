@@ -65,9 +65,13 @@ def _check_similarity(
     identifier = _constraint_id(constraint)
     result = graph.similarity.get(identifier)
     fold_of = assignment.fold_of
-    count, worst, worst_examples, by_pair = _crossing(result, data, assignment)
+    if result is not None and result.groups is not None:
+        total, count, worst, worst_examples, by_pair = _crossing_classes(result, data, assignment)
+    else:
+        count, worst, worst_examples, by_pair = _crossing(result, data, assignment)
+        total = len(result.pairs) if result else 0
     measured = {
-        "pairs_at_or_above_threshold": len(result.pairs) if result else 0,
+        "pairs_at_or_above_threshold": total,
         "cross_fold_pairs_at_or_above_threshold": count,
         "cross_fold_pairs_by_fold_pair": by_pair,
         "max_cross_fold_similarity": round(worst, 6) if worst is not None else None,
@@ -76,8 +80,11 @@ def _check_similarity(
         "exactness": result.exactness if result else "unknown",
         "backend": result.backend if result else "unknown",
     }
+    unparsable = len(result.unparsable) if result else 0
     if count:
         status = VIOLATED
+    elif unparsable:
+        status = SATISFIED_UNPROVEN
     elif result is not None and result.exactness == EXACT:
         status = SATISFIED
     else:
@@ -93,7 +100,13 @@ def _check_similarity(
         for left, right, sim in worst_examples
     ]
     notes = list(result.notes) if result else ["similarity was not computed"]
-    if status == SATISFIED_UNPROVEN:
+    if unparsable and not count:
+        notes.append(
+            f"{unparsable} values could not be parsed by this backend, so they were compared "
+            "to nothing; the search was not exhaustive over the declared key and the result is "
+            "evidence rather than proof"
+        )
+    if status == SATISFIED_UNPROVEN and not unparsable:
         notes.append(
             "no crossing pair was found, but this backend does not guarantee it found every pair, "
             "so the result is evidence rather than proof"
@@ -107,6 +120,51 @@ def _check_similarity(
         examples=examples,
         notes=notes,
     )
+
+
+def _crossing_classes(
+    result: Any,
+    data: Dataset,
+    assignment: Assignment,
+) -> Tuple[int, int, Optional[float], List[Tuple[int, int, float]], Dict[str, int]]:
+    """Count crossings for an equivalence-class backend, arithmetically.
+
+    Members of a class are related by definition, so the implied pair count is
+    quadratic in class size and must never be materialised. Crossings come from
+    per-class fold histograms instead.
+    """
+    histogram: Dict[str, Dict[str, int]] = {}
+    witness: Dict[str, Dict[str, int]] = {}
+    for index, label in enumerate(result.groups):
+        if label is None:
+            continue
+        fold = assignment.fold_of.get(index, DROPPED)
+        if fold == DROPPED:
+            continue
+        histogram.setdefault(label, {})[fold] = histogram.setdefault(label, {}).get(fold, 0) + 1
+        witness.setdefault(label, {}).setdefault(fold, index)
+    total = 0
+    crossing = 0
+    by_pair: Dict[str, int] = {}
+    examples: List[Tuple[int, int, float]] = []
+    for label, folds in histogram.items():
+        size = sum(folds.values())
+        total += size * (size - 1) // 2
+        within = sum(count * (count - 1) // 2 for count in folds.values())
+        crossing += size * (size - 1) // 2 - within
+        names = sorted(folds)
+        for first in range(len(names)):
+            for second in range(first + 1, len(names)):
+                left, right = names[first], names[second]
+                amount = folds[left] * folds[right]
+                key = "|".join(sorted((left, right)))
+                by_pair[key] = by_pair.get(key, 0) + amount
+                if len(examples) < MAX_EXAMPLES:
+                    examples.append(
+                        (witness[label][left], witness[label][right], 1.0)
+                    )
+    worst = 1.0 if crossing else None
+    return total, crossing, worst, examples, dict(sorted(by_pair.items()))
 
 
 def _crossing(

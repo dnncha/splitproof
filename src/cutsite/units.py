@@ -224,9 +224,18 @@ def build(
             )
         similarity[identifier] = result
         merged = 0
-        for left, right, _sim in result.pairs:
-            if union.union(left, right):
-                merged += 1
+        if result.groups is not None:
+            anchors: Dict[str, int] = {}
+            for index, label in enumerate(result.groups):
+                if label is None:
+                    continue
+                anchor = anchors.setdefault(label, index)
+                if anchor != index and union.union(anchor, index):
+                    merged += 1
+        else:
+            for left, right in result.pairs.edges():
+                if union.union(left, right):
+                    merged += 1
         merge_counts[identifier] = merged
 
     for constraint in policy.disjoint_constraints:

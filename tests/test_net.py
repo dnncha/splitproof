@@ -69,6 +69,12 @@ def test_every_registered_backend_charges_the_pair_budget(name: str):
     values = DENSE_MOLECULES if molecular else DENSE_VALUES
     kind = "molecule" if molecular else "protein"
     threshold = 1.0 if backend.metric == "scaffold" else 0.05
+    if backend.emits == "classes":
+        result = backend.pairs_above(values, kind, threshold, max_pairs=5)
+        assert result.groups is not None
+        assert len(result.pairs) == 0
+        assert len({label for label in result.groups if label}) == 1
+        return
     with pytest.raises(TooManyPairs) as error:
         backend.pairs_above(values, kind, threshold, max_pairs=5)
     assert error.value.details["backend"] == backend.name

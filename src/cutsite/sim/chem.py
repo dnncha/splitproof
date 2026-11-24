@@ -181,6 +181,7 @@ class MurckoScaffold(_ChemBackend):
     name = "scaffold"
     metric = "scaffold"
     exactness = EXACT
+    emits = "classes"
 
     def _scaffolds(
         self, values: Sequence[Optional[str]]
@@ -216,15 +217,14 @@ class MurckoScaffold(_ChemBackend):
         for i, scaffold in enumerate(scaffolds):
             if scaffold:
                 buckets.setdefault(scaffold, []).append(i)
-        collector = PairCollector(self.name, threshold, max_pairs)
-        for members in buckets.values():
-            for a_pos in range(len(members)):
-                for b_pos in range(a_pos + 1, len(members)):
-                    collector.add(members[a_pos], members[b_pos], 1.0)
-        pairs = collector.finish()
+        groups: List[Optional[str]] = [None] * len(values)
+        for label, members in buckets.items():
+            for member in members:
+                groups[member] = label
         notes = [
             "molecules sharing a Murcko framework (ring systems plus their linkers, with all "
-            "exocyclic substituents removed) are treated as one unit"
+            "exocyclic substituents removed) form an equivalence class, so no pairwise edge "
+            "list is ever built"
         ]
         if unparsable:
             notes.append(f"{len(unparsable)} entities hold SMILES that RDKit could not parse")
@@ -240,7 +240,7 @@ class MurckoScaffold(_ChemBackend):
             metric=self.metric,
             exactness=EXACT,
             threshold=threshold,
-            pairs=pairs,
+            groups=groups,
             missing=missing,
             unparsable=unparsable,
             notes=notes,

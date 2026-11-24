@@ -67,9 +67,26 @@ class PairSet:
     def __len__(self) -> int:
         return int(self.rows.size)
 
+    CHUNK = 1 << 20
+
     def __iter__(self) -> Iterator[Tuple[int, int, float]]:
-        rows, cols, sims = self.rows.tolist(), self.cols.tolist(), self.sims.tolist()
-        return iter(zip(rows, cols, sims))
+        total = int(self.rows.size)
+        for start in range(0, total, self.CHUNK):
+            stop = min(start + self.CHUNK, total)
+            rows = self.rows[start:stop].tolist()
+            cols = self.cols[start:stop].tolist()
+            sims = self.sims[start:stop].tolist()
+            for triple in zip(rows, cols, sims):
+                yield triple
+
+    def edges(self) -> Iterator[Tuple[int, int]]:
+        total = int(self.rows.size)
+        for start in range(0, total, self.CHUNK):
+            stop = min(start + self.CHUNK, total)
+            rows = self.rows[start:stop].tolist()
+            cols = self.cols[start:stop].tolist()
+            for pair in zip(rows, cols):
+                yield pair
 
     def __getitem__(self, position: int) -> Tuple[int, int, float]:
         return (int(self.rows[position]), int(self.cols[position]), float(self.sims[position]))
@@ -131,6 +148,34 @@ class PairCollector:
         return PairSet.from_blocks(self._blocks)
 
 
+def guard_candidate_budget(count: int, max_pairs: int, backend: str, threshold: float) -> None:
+    """Refuse before enumerating a quadratic candidate set.
+
+    LSH candidate generation happens before any similarity is known, so it has to be
+    bounded on its own. The count is the sum over buckets of their implied pairs, which
+    over-counts anything colliding in more than one band, so this refuses no later than
+    the true candidate count would.
+    """
+    if count <= max_pairs:
+        return
+    raise TooManyPairs(
+        f"{backend} would consider at least {count} candidate pairs at {threshold:g}, over the "
+        f"{max_pairs} the run allows",
+        remedy=(
+            "Candidate generation is bounded separately from the result, because it happens "
+            "before any similarity is known. Almost everything is colliding in the same LSH "
+            "bucket, so raise the threshold, split on a coarser key, or raise --max-pairs."
+        ),
+        details={
+            "candidate_pairs": count,
+            "max_pairs": max_pairs,
+            "backend": backend,
+            "threshold": threshold,
+            "stage": "candidate_generation",
+        },
+    )
+
+
 def guard_pair_budget(count: int, max_pairs: int, backend: str, threshold: float) -> None:
     if count <= max_pairs:
         return
@@ -153,6 +198,7 @@ class SimilarityResult:
     exactness: str
     threshold: float
     pairs: PairSet = field(default_factory=PairSet.empty)
+    groups: Optional[List[Optional[str]]] = None
     missing: List[int] = field(default_factory=list)
     unparsable: List[int] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
@@ -166,6 +212,11 @@ class SimilarityResult:
             "exactness": self.exactness,
             "threshold": self.threshold,
             "edges": len(self.pairs),
+            "equivalence_classes": (
+                len({label for label in self.groups if label is not None})
+                if self.groups is not None
+                else None
+            ),
             "missing_values": len(self.missing),
             "unparsable_values": len(self.unparsable),
             "params": dict(sorted(self.params.items())),
@@ -177,6 +228,7 @@ class SimilarityBackend:
     name = "abstract"
     metric = "abstract"
     exactness = LOWER_BOUND
+    emits = "pairs"
 
     def version(self) -> str:
         raise NotImplementedError

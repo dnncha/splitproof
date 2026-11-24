@@ -61,10 +61,12 @@ def test_minhash_respects_the_same_budget():
         MinHashJaccard().pairs_above(values, "protein", 0.2, max_pairs=500)
 
 
-def test_duplicate_backend_respects_the_same_budget():
-    values = ["ACDEFGHIKLMNP"] * 200
-    with pytest.raises(TooManyPairs):
-        ExactDuplicate().pairs_above(values, "protein", 1.0, max_pairs=100)
+def test_an_equivalence_class_backend_handles_a_huge_bucket_without_pairs():
+    values = ["ACDEFGHIKLMNP"] * 20000
+    result = ExactDuplicate().pairs_above(values, "protein", 1.0, max_pairs=10)
+    assert result.groups is not None
+    assert len(result.pairs) == 0
+    assert len({label for label in result.groups if label}) == 1
 
 
 def test_default_budget_is_generous_enough_for_ordinary_work():

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -13,12 +14,24 @@ from . import (
     SimilarityBackend,
     SimilarityResult,
     PairCollector,
+    guard_candidate_budget,
     register,
 )
 
 DEFAULT_K = {"protein": 5, "dna": 12, "rna": 12, "text": 4, "molecule": 4}
 
 _MERSENNE = (1 << 61) - 1
+
+
+def stable_hash(token: str, salt: bytes) -> int:
+    """A token hash that does not change between processes.
+
+    Python's built-in hash() is salted per process, so using it here made the MinHash
+    signatures, and therefore the split, depend on which interpreter run produced them.
+    """
+    return int.from_bytes(
+        hashlib.blake2b(token.encode("utf-8"), digest_size=8, key=salt).digest(), "little"
+    )
 
 
 def kmer_size(kind: str) -> int:
@@ -209,6 +222,16 @@ class MinHashJaccard(SimilarityBackend):
         return best
 
     def _signatures(self, values: Sequence[Optional[str]], k: int):
+        salt = self.seed.to_bytes(8, "little", signed=False)
+        cache: Dict[str, int] = {}
+
+        def cache_hash(token: str) -> int:
+            value = cache.get(token)
+            if value is None:
+                value = stable_hash(token, salt) & 0xFFFFFFFFFFFFFFFF
+                cache[token] = value
+            return value
+
         rng = np.random.default_rng(self.seed)
         coeff_a = rng.integers(1, _MERSENNE, size=self.num_perm, dtype=np.uint64)
         coeff_b = rng.integers(0, _MERSENNE, size=self.num_perm, dtype=np.uint64)
@@ -228,7 +251,7 @@ class MinHashJaccard(SimilarityBackend):
             unique = frozenset(tokens)
             token_sets.append(unique)
             hashes = np.fromiter(
-                (np.uint64(hash(token) & 0xFFFFFFFFFFFFFFFF) for token in unique),
+                (np.uint64(cache_hash(token)) for token in unique),
                 dtype=np.uint64,
                 count=len(unique),
             )
@@ -248,6 +271,7 @@ class MinHashJaccard(SimilarityBackend):
         bands, rows = self._bands(threshold)
         signatures, token_sets, missing = self._signatures(values, k)
         candidates: set = set()
+        considered = 0
         for band in range(bands):
             buckets: Dict[bytes, List[int]] = {}
             lo, hi = band * rows, (band + 1) * rows
@@ -258,6 +282,8 @@ class MinHashJaccard(SimilarityBackend):
             for members in buckets.values():
                 if len(members) < 2:
                     continue
+                considered += len(members) * (len(members) - 1) // 2
+                guard_candidate_budget(considered, max_pairs, self.name, threshold)
                 for a_pos in range(len(members)):
                     for b_pos in range(a_pos + 1, len(members)):
                         candidates.add((members[a_pos], members[b_pos]))
