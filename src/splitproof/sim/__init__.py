@@ -5,7 +5,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tupl
 
 import numpy as np
 
-from ..errors import BackendUnavailable, CutsiteError
+from ..errors import BackendUnavailable, SplitproofError
 
 EXACT = "exact"
 HEURISTIC = "heuristic"
@@ -16,7 +16,7 @@ EXACTNESS_RANK = {EXACT: 2, HEURISTIC: 1, LOWER_BOUND: 0}
 DEFAULT_MAX_PAIRS = 20_000_000
 
 
-class TooManyPairs(CutsiteError):
+class TooManyPairs(SplitproofError):
     code = "TOO_MANY_PAIRS"
 
 
@@ -237,7 +237,7 @@ class SimilarityBackend:
         return True
 
     def install_hint(self) -> str:
-        return "pip install cutsite"
+        return "pip install splitproof"
 
     def pairs_above(
         self,

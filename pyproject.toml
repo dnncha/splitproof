@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cutsite"
+name = "splitproof"
 version = "0.1.0"
 description = "Build, audit and prove leakage-free train/test splits for biological data."
 readme = "README.md"
@@ -34,14 +34,14 @@ parquet = ["pyarrow>=12.0"]
 dev = ["pytest>=7.4", "hypothesis>=6.100"]
 
 [project.scripts]
-cutsite = "cutsite.cli:main"
+splitproof = "splitproof.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/dnncha/cutsite"
-Issues = "https://github.com/dnncha/cutsite/issues"
+Homepage = "https://github.com/dnncha/splitproof"
+Issues = "https://github.com/dnncha/splitproof/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/cutsite"]
+packages = ["src/splitproof"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

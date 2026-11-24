@@ -28,7 +28,7 @@ COV_MODE_DEFAULT = 0
 def _run(command, backend: str):
     import subprocess as _subprocess
 
-    from ..errors import CutsiteError
+    from ..errors import SplitproofError
 
     try:
         return _subprocess.run(command, capture_output=True, text=True, check=True)
@@ -40,7 +40,7 @@ def _run(command, backend: str):
         ) from exc
     except _subprocess.CalledProcessError as exc:
         tail = (exc.stderr or exc.stdout or "").strip().splitlines()
-        raise CutsiteError(
+        raise SplitproofError(
             f"MMseqs2 exited with status {exc.returncode}",
             remedy=(
                 "Check the sequences are valid protein or nucleotide records, and that the "
@@ -127,7 +127,7 @@ class MMseqs2Identity(SimilarityBackend):
         return (
             "Install MMseqs2 to measure true sequence identity: 'brew install mmseqs2', "
             "'conda install -c bioconda mmseqs2', or see github.com/soedinglab/MMseqs2. "
-            "Without it, use metric 'kmer_jaccard', which cutsite computes exactly but which is "
+            "Without it, use metric 'kmer_jaccard', which splitproof computes exactly but which is "
             "not sequence identity."
         )
 
@@ -202,7 +202,7 @@ class MMseqs2Identity(SimilarityBackend):
             notes.append(f"{len(missing)} entities have no sequence and are treated as unrelated")
         triples: List[Tuple[int, int, float]] = []
         if len(present) > 1:
-            with tempfile.TemporaryDirectory(prefix="cutsite-mmseqs-") as workdir:
+            with tempfile.TemporaryDirectory(prefix="splitproof-mmseqs-") as workdir:
                 root = Path(workdir)
                 fasta = root / "seqs.fasta"
                 out = root / "hits.tsv"
@@ -246,7 +246,7 @@ class MMseqs2Identity(SimilarityBackend):
         target_list = [i for i in sorted(set(int(t) for t in targets)) if values[i]]
         if not query_list or not target_list:
             return out
-        with tempfile.TemporaryDirectory(prefix="cutsite-mmseqs-nn-") as workdir:
+        with tempfile.TemporaryDirectory(prefix="splitproof-mmseqs-nn-") as workdir:
             root = Path(workdir)
             query_fasta, target_fasta, hits = root / "q.fasta", root / "t.fasta", root / "hits.tsv"
             self._write_fasta(query_fasta, values, query_list)

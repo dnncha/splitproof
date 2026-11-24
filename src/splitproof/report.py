@@ -93,7 +93,7 @@ def markdown(certificate: Dict[str, Any]) -> str:
     units = certificate.get("units", {})
     assignment = certificate.get("assignment", {})
     out: List[str] = []
-    out.append("# cutsite report")
+    out.append("# splitproof report")
     out.append("")
     out.append(f"**Status: {STATUS_WORD.get(status, status)}**")
     out.append("")
@@ -101,7 +101,7 @@ def markdown(certificate: Dict[str, Any]) -> str:
     out.append(f"- data digest: `{dataset.get('digest')}`")
     out.append(f"- policy digest: `{certificate.get('policy_digest')}`")
     out.append(f"- assignment digest: `{assignment.get('digest')}`")
-    out.append(f"- cutsite {certificate.get('cutsite', {}).get('version')}, seed {certificate.get('seed')}")
+    out.append(f"- splitproof {certificate.get('splitproof', {}).get('version')}, seed {certificate.get('seed')}")
     out.append("")
 
     out.append("## Folds")
@@ -177,10 +177,10 @@ def markdown(certificate: Dict[str, Any]) -> str:
     out.append("## What this does and does not prove")
     out.append("")
     out.append(
-        "cutsite proves exactly the constraints the policy declares, measured by the named backend. "
+        "splitproof proves exactly the constraints the policy declares, measured by the named backend. "
         "A `proven` status means no pair at or above the declared threshold crosses folds, and the "
         "backend searched every pair. A `no violation found` status means the backend is sensitive but "
-        "heuristic, so absence of a crossing pair is evidence, not proof. cutsite sets no thresholds of "
+        "heuristic, so absence of a crossing pair is evidence, not proof. splitproof sets no thresholds of "
         "its own and passes no judgement on constraints you did not declare."
     )
     out.append("")

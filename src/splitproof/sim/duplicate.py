@@ -29,7 +29,7 @@ class ExactDuplicate(SimilarityBackend):
         return "builtin-1"
 
     def install_hint(self) -> str:
-        return "pip install cutsite"
+        return "pip install splitproof"
 
     def pairs_above(
         self,

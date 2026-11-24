@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from cutsite import api, dataset as dataset_module, units as units_module
-from cutsite.errors import VacuousConstraint
-from cutsite.policy import Policy
+from splitproof import api, dataset as dataset_module, units as units_module
+from splitproof.errors import VacuousConstraint
+from splitproof.policy import Policy
 
 from conftest import make_rows, write_csv
 

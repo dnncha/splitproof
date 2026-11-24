@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import __version__, api, cert as cert_module, dataset as dataset_module, report as report_module
-from .errors import CutsiteError, InfeasibleSplit
+from .errors import SplitproofError, InfeasibleSplit
 from .evaluate import SATISFIED_UNPROVEN, VIOLATED
 from .policy import Policy
 
@@ -39,19 +39,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except InfeasibleSplit as error:
         _emit_error(error, args)
         return EXIT_INFEASIBLE
-    except CutsiteError as error:
+    except SplitproofError as error:
         _emit_error(error, args)
         return EXIT_ERROR
     except BrokenPipeError:
         return EXIT_OK
 
 
-def _emit_error(error: CutsiteError, args: argparse.Namespace) -> None:
+def _emit_error(error: SplitproofError, args: argparse.Namespace) -> None:
     if getattr(args, "json", False):
         json.dump({"ok": False, "error": error.to_dict()}, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
         return
-    print(f"cutsite: {error.code}: {error.message}", file=sys.stderr)
+    print(f"splitproof: {error.code}: {error.message}", file=sys.stderr)
     if error.remedy:
         print(f"  {error.remedy}", file=sys.stderr)
     for name, value in sorted(error.details.items()):
@@ -60,10 +60,10 @@ def _emit_error(error: CutsiteError, args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="cutsite",
+        prog="splitproof",
         description="Build, audit and prove leakage-free train/test splits for biological data.",
     )
-    parser.add_argument("--version", action="version", version=f"cutsite {__version__}")
+    parser.add_argument("--version", action="version", version=f"splitproof {__version__}")
     subparsers = parser.add_subparsers(dest="command")
 
     common = argparse.ArgumentParser(add_help=False)
@@ -104,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     split.add_argument("policy", type=Path)
     split.add_argument("--out", type=Path, default=Path("split.csv"), help="where to write id,fold")
-    split.add_argument("--cert", type=Path, default=Path("cutsite.cert.json"))
+    split.add_argument("--cert", type=Path, default=Path("splitproof.cert.json"))
     split.add_argument("--report", type=Path, default=None, help="also write a Markdown report here")
     split.add_argument(
         "--tolerance",
@@ -143,13 +143,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     init = subparsers.add_parser("init", help="write a starter policy by inspecting a data file")
     init.add_argument("data", type=Path)
-    init.add_argument("--out", type=Path, default=Path("cutsite.yaml"))
-    init.add_argument("--id", default=None, help="id column, if cutsite should not guess")
+    init.add_argument("--out", type=Path, default=Path("policy.yaml"))
+    init.add_argument("--id", default=None, help="id column, if splitproof should not guess")
     init.add_argument("--json", action="store_true")
     init.set_defaults(handler=_cmd_init)
 
     mcp = subparsers.add_parser(
-        "mcp", help="serve cutsite to an AI agent as an MCP server over stdio"
+        "mcp", help="serve splitproof to an AI agent as an MCP server over stdio"
     )
     mcp.set_defaults(handler=_cmd_mcp)
 
@@ -171,7 +171,7 @@ def _overrides(values: Sequence[str]) -> Dict[str, str]:
     out: Dict[str, str] = {}
     for item in values:
         if "=" not in item:
-            raise CutsiteError(
+            raise SplitproofError(
                 f"--backend expects KEY=BACKEND, got {item!r}",
                 remedy="For example: --backend sequence=exact_jaccard",
             )
@@ -342,7 +342,7 @@ def _outcome_exit(args: argparse.Namespace, certificate: Dict[str, Any], ok: boo
         ]
         if not args.json:
             print(
-                f"cutsite: --require-exact was set, but {unproven} were not proven exhaustively",
+                f"splitproof: --require-exact was set, but {unproven} were not proven exhaustively",
                 file=sys.stderr,
             )
         return EXIT_VIOLATED
@@ -444,10 +444,10 @@ def guess_policy(path: Path, id_column: Optional[str] = None) -> Tuple[Dict[str,
     for group in groups:
         constraints.append({"kind": "disjoint", "key": group})
     if not constraints:
-        raise CutsiteError(
+        raise SplitproofError(
             "could not recognise a sequence, molecule, group or date column to constrain",
             remedy=(
-                "cutsite will not invent a constraint. Write the policy by hand: declare the "
+                "splitproof will not invent a constraint. Write the policy by hand: declare the "
                 "column under dataset.similarity or dataset.groups, then add the constraint that "
                 "matches your claim. See the README for a worked policy."
             ),
@@ -455,7 +455,7 @@ def guess_policy(path: Path, id_column: Optional[str] = None) -> Tuple[Dict[str,
         )
 
     policy: Dict[str, Any] = {
-        "cutsite": 1,
+        "splitproof": 1,
         "dataset": {
             "path": str(path),
             "id": header_id,
@@ -497,7 +497,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
             f"wrote {args.out} for {seen['rows']} rows: id='{seen['id']}', "
             f"similarity={seen['similarity']}, groups={seen['groups']}, dates={seen['dates']}"
         )
-        print("Review it: cutsite guessed these columns, and a guess is not a policy.")
+        print("Review it: splitproof guessed these columns, and a guess is not a policy.")
         if seen["needs_mmseqs"]:
             print("The sequence constraint uses metric 'identity', which needs MMseqs2 installed.")
     return EXIT_OK

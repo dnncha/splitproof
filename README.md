@@ -1,18 +1,19 @@
-# cutsite
+# splitproof
 
 **Leakage-free train/test splits for biological data — built, audited, and provable.**
 
-A cut site is the exact, reproducible position where a sequence gets cleaved. `cutsite`
-is the exact, reproducible position where you cut your dataset — and the proof that you
-cut it where you said you did.
+You declare what must not leak between your folds. `splitproof` builds a split that
+honours it, measures what it actually achieved, and writes a certificate anyone can
+re-derive from your data. Point it at someone else's split and it tells you what they
+really tested on.
 
 ```sh
-pip install cutsite
+pip install splitproof
 
-cutsite init data.csv                 # guess a starter policy from the columns
-cutsite split cutsite.yaml            # build the split + write a certificate
-cutsite verify cutsite.cert.json --split split.csv   # re-prove it in seconds
-cutsite audit cutsite.yaml --split-column fold       # measure leakage in someone else's split
+splitproof init data.csv                     # guess a starter policy from the columns
+splitproof split policy.yaml                 # build the split, write a certificate
+splitproof verify splitproof.cert.json --split split.csv    # re-derive every number
+splitproof audit policy.yaml --split-column fold            # grade a split you were handed
 ```
 
 ## Why
@@ -26,17 +27,17 @@ training plate, from a training site. The model learns the overlap and the bench
 rewards it.
 
 The usual fix is a one-off clustering script in the paper's repo that nobody can rerun
-and no reviewer checks. `cutsite` turns that script into an artifact: a declared policy,
+and no reviewer checks. `splitproof` turns that script into an artifact: a declared policy,
 a measured result, and a certificate anyone can re-verify against the data.
 
 ## How it works
 
-You declare what must not leak. `cutsite` makes the split that honours it, measures what
+You declare what must not leak. `splitproof` makes the split that honours it, measures what
 it achieved, and anchors the result to digests of the policy, the data and the
 assignment, so any change is detectable.
 
 ```yaml
-cutsite: 1
+splitproof: 1
 
 dataset:
   path: data.csv
@@ -70,7 +71,7 @@ That policy says three things: no pair of sequences at or above 30% identity may
 folds, no donor may appear in two folds, and nothing deposited on or after 2025-06-01
 may end up in training.
 
-`cutsite` enforces them by building a graph of everything that must stay together —
+`splitproof` enforces them by building a graph of everything that must stay together —
 similarity edges above the threshold, plus shared group values — taking its connected
 components as the atomic units of assignment, and packing those units into folds with a
 deterministic, label-stratified, seeded allocator. Because the components are
@@ -79,7 +80,7 @@ end up on opposite sides. That is a property of the construction, not a hope.
 
 ## The certificate
 
-Every split writes a `cutsite.cert.json`: small, diffable, and safe to commit.
+Every split writes a `splitproof.cert.json`: small, diffable, and safe to commit.
 
 ```json
 {
@@ -101,7 +102,7 @@ Every split writes a `cutsite.cert.json`: small, diffable, and safe to commit.
 }
 ```
 
-`cutsite verify` rebuilds the whole certificate from the data and the fold column and
+`splitproof verify` rebuilds the whole certificate from the data and the fold column and
 compares it field by field: the digests, every constraint's measured values, the unit
 structure, the backends and their parameters, and the leakage diagnostics. A certificate
 whose numbers were edited by hand does not verify, and the failure names the exact path:
@@ -124,13 +125,13 @@ file with your own key if you need that.
 
 ## What the status word does not mean
 
-`cutsite` fails only on constraints you declared, which means **a lax policy gets a clean
+`splitproof` fails only on constraints you declared, which means **a lax policy gets a clean
 status**. Declare k-mer Jaccard at 0.95 on a set of close homologs and you will be told
 `proven`, truthfully, because no pair at 0.95 crosses folds.
 
 This is deliberate: a tool that invented its own identity cutoff would be asserting an
 opinion your field has not agreed on. But it means the status word alone is not a quality
-claim, so cutsite prints the number that contradicts it on the very next line:
+claim, so splitproof prints the number that contradicts it on the very next line:
 
 ```
 Constraint status: proven.
@@ -146,7 +147,7 @@ Quote the status and the worst similarity together, or neither.
 
 These are load-bearing, not decoration.
 
-**It never invents a threshold.** `cutsite` fails only on constraints you declared. It
+**It never invents a threshold.** `splitproof` fails only on constraints you declared. It
 has no opinion about what identity cutoff your field should use, and it will not quietly
 grade your data against one.
 
@@ -160,7 +161,7 @@ certificate records it.
 | `lower_bound` | approximate candidate generation (MinHash LSH) | `satisfied_unproven` |
 
 A clean result from an approximate backend is reported as *no violation found*, never as
-proven. `cutsite` will not launder a heuristic into a guarantee.
+proven. `splitproof` will not launder a heuristic into a guarantee.
 
 **It does not call k-mer Jaccard "identity".** Without MMseqs2 installed, the sequence
 backend computes exact k-mer Jaccard and says so. It is a real, reproducible,
@@ -177,11 +178,11 @@ in 4.9s and 233MB of edge storage.
 **A constraint that cannot bind is an error, not a pass.** If every entity lacks a usable
 value for a similarity key, the constraint could never fire and a clean result would
 prove nothing, so you get `CONSTRAINT_VACUOUS`. This is not hypothetical: RDKit
-2026.09's `MurckoDecompose` raises on every molecule, and an earlier build of cutsite
+2026.09's `MurckoDecompose` raises on every molecule, and an earlier build of splitproof
 swallowed that into "no scaffolds" and reported the split as satisfied.
 
 **It honours the fractions you asked for.** Fold sizes come first and label
-stratification only breaks exact ties, so cutsite will not quietly hand you a 75/25
+stratification only breaks exact ties, so splitproof will not quietly hand you a 75/25
 split because that balanced the labels better. Granularity is bounded by your largest
 unit, and the drift is always reported.
 
@@ -193,7 +194,7 @@ split that silently buries the problem.
 
 ## Diagnostics worth more than the split
 
-`cutsite split` and `cutsite audit` both report:
+`splitproof split` and `splitproof audit` both report:
 
 - **Nearest-neighbour similarity distribution** for every held-out item against the
   reference fold — median, p99, max. The shape of your actual generalisation gap.
@@ -213,7 +214,7 @@ random split in the `fold_random` column — the split almost every pipeline pro
 default. Auditing it:
 
 ```
-$ cutsite audit proteins.yaml --split-column fold_random
+$ splitproof audit proteins.yaml --split-column fold_random
 240 entities in 6 independent units; folds: test=74, train=166.
 Constraint status: VIOLATED.
 - no pair above kmer_jaccard 0.4 on 'sequence' may cross folds: VIOLATED.
@@ -230,10 +231,10 @@ similar to something in training, and **a model that does nothing but copy its n
 training neighbour's label scores 0.88.** Any result near 0.9 on this split is
 indistinguishable from having learned nothing.
 
-The same data, split by `cutsite`:
+The same data, split by `splitproof`:
 
 ```
-$ cutsite split proteins.yaml
+$ splitproof split proteins.yaml
 240 entities in 6 independent units; folds: test=42, train=198.
 Constraint status: proven.
 Worst held-out similarity to the reference fold: 0.00232 (31 of 42 held-out items have
@@ -255,14 +256,14 @@ demonstrates the mechanism; it is not evidence about any real dataset.
 
 Note the fold sizes: 42/198, not the requested 48/192. Six donor groups across 240 rows
 means only six independent units exist, so the achievable fractions are coarse.
-`cutsite` reports the drift rather than hiding it.
+`splitproof` reports the drift rather than hiding it.
 
 ## With real sequence identity
 
 Install MMseqs2 and the same audit speaks in the units a biologist argues in:
 
 ```
-$ cutsite audit proteins-identity.yaml --split-column fold_random
+$ splitproof audit proteins-identity.yaml --split-column fold_random
 Constraint status: VIOLATED.
 - no pair above identity 0.3 on 'sequence' may cross folds: VIOLATED.
 ```
@@ -280,21 +281,21 @@ median 95.4%. That is the sentence to put in front of anyone defending a random 
 
 Note the status is `satisfied_unproven` rather than `satisfied` when such a split comes
 back clean: MMseqs2 is sensitive but heuristic, so absence of a crossing pair is strong
-evidence and not a proof. cutsite says which it has.
+evidence and not a proof. splitproof says which it has.
 
 ## Auditing somebody else's split
 
 The fastest way to find out whether a benchmark means anything:
 
 ```sh
-cutsite audit policy.yaml --split-column split --report leakage.md
+splitproof audit policy.yaml --split-column split --report leakage.md
 ```
 
 Exit code 1 and a list of the worst crossing pairs, by similarity, with ids.
 
 ## Built for agents
 
-`cutsite` is designed to be driven by an AI agent as much as by a human.
+`splitproof` is designed to be driven by an AI agent as much as by a human.
 
 - Every command takes `--json` and emits a stable schema with a `summary` field written
   to be read by a model.
@@ -307,14 +308,14 @@ Exit code 1 and a list of the worst crossing pairs, by similarity, with ids.
 - `--require-exact` fails the build unless every constraint was proven exhaustively, so
   an agent cannot quietly accept `satisfied_unproven` as a pass.
 
-`cutsite mcp` serves the same operations over stdio with no extra dependencies:
+`splitproof mcp` serves the same operations over stdio with no extra dependencies:
 
 ```json
-{ "mcpServers": { "cutsite": { "command": "cutsite", "args": ["mcp"] } } }
+{ "mcpServers": { "splitproof": { "command": "splitproof", "args": ["mcp"] } } }
 ```
 
-Tools: `cutsite_init`, `cutsite_split`, `cutsite_audit`, `cutsite_verify`,
-`cutsite_units`, `cutsite_explain`. [`agent/SKILL.md`](agent/SKILL.md) is a drop-in skill
+Tools: `splitproof_init`, `splitproof_split`, `splitproof_audit`, `splitproof_verify`,
+`splitproof_units`, `splitproof_explain`. [`agent/SKILL.md`](agent/SKILL.md) is a drop-in skill
 file telling an agent when to reach for it and how to read the result honestly.
 
 ## Backends
@@ -324,11 +325,11 @@ file telling an agent when to reach for it and how to read the result honestly.
 | `identity` | MMseqs2 | `mmseqs` on PATH | heuristic |
 | `kmer_jaccard` | exact sparse Jaccard | core install | exact |
 | `kmer_jaccard` | MinHash LSH (large n) | core install | lower bound |
-| `tanimoto` | RDKit Morgan fingerprints | `cutsite[chem]` | exact |
-| `ring_systems` | canonical ring-system set over RDKit | `cutsite[chem]` | exact |
+| `tanimoto` | RDKit Morgan fingerprints | `splitproof[chem]` | exact |
+| `ring_systems` | canonical ring-system set over RDKit | `splitproof[chem]` | exact |
 | `exact_duplicate` | normalised equality | core install | exact |
 
-Reads CSV, TSV, FASTA, and Parquet with `cutsite[parquet]`.
+Reads CSV, TSV, FASTA, and Parquet with `splitproof[parquet]`.
 
 The `ring_systems` backend groups molecules by their canonical set of ring systems,
 computed as SMILES fragments of the parent molecule so nothing is edited and nothing
@@ -344,7 +345,7 @@ rather than silently treated as thousands of classes.
 
 ## Scope
 
-`cutsite` is for splitting and auditing datasets in clinical genomics, cell biology,
+`splitproof` is for splitting and auditing datasets in clinical genomics, cell biology,
 ADMET and toxicology, imaging, and proteomics. It is evaluation infrastructure: it
 measures and constrains, and it hosts no optimisation loop or screening oracle.
 

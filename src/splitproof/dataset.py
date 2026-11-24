@@ -80,7 +80,7 @@ def _normalise(value: Any) -> Optional[str]:
 
     'NA' is North America, neuraminidase, sodium and the Asn-Ala dipeptide. 'None'
     is the unperturbed arm of a Perturb-seq screen. 'Null' is a knockout genotype.
-    Treating those as missing silently unconstrains real groups, so cutsite does not.
+    Treating those as missing silently unconstrains real groups, so splitproof does not.
     """
     if value is None:
         return None
@@ -119,7 +119,7 @@ def _from_records(records: Sequence[Dict[str, Any]], fieldnames: Sequence[str], 
         for name in fieldnames:
             columns[name].append(_normalise(record.get(name)))
     if not ids:
-        raise DataError("the dataset has no rows", remedy="Point cutsite at a file with data in it.")
+        raise DataError("the dataset has no rows", remedy="Point splitproof at a file with data in it.")
     return Dataset(ids=ids, columns=columns, path=path)
 
 
@@ -155,7 +155,7 @@ def load_parquet(path: Path, id_column: str) -> Dataset:
     except ModuleNotFoundError as exc:
         raise DataError(
             "reading Parquet needs pyarrow",
-            remedy="pip install 'cutsite[parquet]', or convert the file to CSV.",
+            remedy="pip install 'splitproof[parquet]', or convert the file to CSV.",
             details={"path": str(path)},
         ) from exc
     table = pq.read_table(path)
@@ -202,7 +202,7 @@ def load(path: Path, id_column: str) -> Dataset:
         return load_fasta(path, id_column)
     raise DataError(
         f"unrecognised data format: {path.suffix or path.name}",
-        remedy="cutsite reads .csv, .tsv, .parquet and .fasta.",
+        remedy="splitproof reads .csv, .tsv, .parquet and .fasta.",
         details={"path": str(path)},
     )
 

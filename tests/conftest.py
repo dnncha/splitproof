@@ -66,7 +66,7 @@ def data_file(tmp_path: Path, rows: List[Dict[str, str]]) -> Path:
 @pytest.fixture
 def policy_dict(data_file: Path) -> Dict[str, object]:
     return {
-        "cutsite": 1,
+        "splitproof": 1,
         "dataset": {
             "path": str(data_file),
             "id": "accession",

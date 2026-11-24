@@ -3,9 +3,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from cutsite.sim import DEFAULT_MAX_PAIRS, PairSet, TooManyPairs, guard_pair_budget
-from cutsite.sim.duplicate import ExactDuplicate
-from cutsite.sim.kmer import ExactJaccard, MinHashJaccard
+from splitproof.sim import DEFAULT_MAX_PAIRS, PairSet, TooManyPairs, guard_pair_budget
+from splitproof.sim.duplicate import ExactDuplicate
+from splitproof.sim.kmer import ExactJaccard, MinHashJaccard
 
 from conftest import make_rows
 

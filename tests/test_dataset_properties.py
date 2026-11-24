@@ -6,8 +6,8 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from cutsite import dataset as dataset_module
-from cutsite.errors import CutsiteError, DataError
+from splitproof import dataset as dataset_module
+from splitproof.errors import SplitproofError, DataError
 
 SETTINGS = settings(
     max_examples=250,
@@ -36,7 +36,7 @@ def test_arbitrary_csv_bytes_give_a_data_error_not_a_traceback(tmp_path, text):
     except DataError as error:
         assert error.message
         assert error.code == "DATA_INVALID"
-    except CutsiteError as error:
+    except SplitproofError as error:
         assert error.message
 
 
@@ -48,7 +48,7 @@ def test_arbitrary_fasta_bytes_give_a_data_error_not_a_traceback(tmp_path, text)
         dataset_module.load(path, "id")
     except DataError as error:
         assert error.message
-    except CutsiteError as error:
+    except SplitproofError as error:
         assert error.message
 
 
@@ -58,7 +58,7 @@ def test_arbitrary_tsv_bytes_give_a_data_error_not_a_traceback(tmp_path, text):
     path = _write(tmp_path, "fuzz.tsv", text)
     try:
         dataset_module.load(path, "id")
-    except CutsiteError as error:
+    except SplitproofError as error:
         assert error.message
 
 
@@ -126,8 +126,8 @@ def test_only_an_empty_cell_is_missing(tmp_path):
 
 
 def test_a_group_named_na_is_still_a_group(tmp_path):
-    from cutsite import api
-    from cutsite.policy import Policy
+    from splitproof import api
+    from splitproof.policy import Policy
 
     path = _write(
         tmp_path,
@@ -139,7 +139,7 @@ def test_a_group_named_na_is_still_a_group(tmp_path):
         "d,WWWWWWWWWWWWWWWWW,None,test\n",
     )
     payload = {
-        "cutsite": 1,
+        "splitproof": 1,
         "dataset": {
             "path": str(path),
             "id": "id",
@@ -179,7 +179,7 @@ def test_fasta_wraps_are_joined(tmp_path):
 def test_nul_bytes_are_refused_the_same_way_on_every_python(tmp_path):
     """Python 3.10's csv module raises on NUL and 3.13's does not.
 
-    cutsite refuses NUL itself so the behaviour does not depend on the interpreter.
+    splitproof refuses NUL itself so the behaviour does not depend on the interpreter.
     """
     with_nul = tmp_path / "nul.csv"
     with_nul.write_bytes("id,seq\na\x00b,ACDEF\n".encode("utf-8"))

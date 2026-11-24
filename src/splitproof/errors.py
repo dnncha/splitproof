@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 
-class CutsiteError(Exception):
-    code = "CUTSITE_ERROR"
+class SplitproofError(Exception):
+    code = "SPLITPROOF_ERROR"
 
     def __init__(self, message: str, *, remedy: str = "", details: Optional[Dict[str, Any]] = None):
         super().__init__(message)
@@ -21,19 +21,19 @@ class CutsiteError(Exception):
         }
 
 
-class PolicyError(CutsiteError):
+class PolicyError(SplitproofError):
     code = "POLICY_INVALID"
 
 
-class DataError(CutsiteError):
+class DataError(SplitproofError):
     code = "DATA_INVALID"
 
 
-class BackendUnavailable(CutsiteError):
+class BackendUnavailable(SplitproofError):
     code = "BACKEND_UNAVAILABLE"
 
 
-class InfeasibleSplit(CutsiteError):
+class InfeasibleSplit(SplitproofError):
     code = "SPLIT_INFEASIBLE"
 
 
@@ -41,17 +41,17 @@ class GiantUnit(InfeasibleSplit):
     code = "GIANT_UNIT"
 
 
-class BackendFailed(CutsiteError):
+class BackendFailed(SplitproofError):
     code = "BACKEND_FAILED"
 
 
-class VacuousConstraint(CutsiteError):
+class VacuousConstraint(SplitproofError):
     code = "CONSTRAINT_VACUOUS"
 
 
-class CertificateMismatch(CutsiteError):
+class CertificateMismatch(SplitproofError):
     code = "CERT_MISMATCH"
 
 
-class ConstraintViolated(CutsiteError):
+class ConstraintViolated(SplitproofError):
     code = "CONSTRAINT_VIOLATED"

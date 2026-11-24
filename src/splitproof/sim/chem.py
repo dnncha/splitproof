@@ -18,7 +18,7 @@ RADIUS_DEFAULT = 2
 BITS_DEFAULT = 2048
 
 _HINT = (
-    "Molecule similarity needs RDKit: pip install 'cutsite[chem]', or "
+    "Molecule similarity needs RDKit: pip install 'splitproof[chem]', or "
     "conda install -c conda-forge rdkit."
 )
 
@@ -206,7 +206,7 @@ class RingSystems(_ChemBackend):
                 raise BackendFailed(
                     f"could not extract ring systems from {value!r}",
                     remedy=(
-                        "This is a bug in cutsite's framework reduction, not in your data. "
+                        "This is a bug in splitproof's framework reduction, not in your data. "
                         "Please report the SMILES."
                     ),
                     details={"backend": self.name, "smiles": value, "reason": str(exc)},

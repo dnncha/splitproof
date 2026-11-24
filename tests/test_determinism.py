@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from cutsite import api
-from cutsite.policy import Policy
-from cutsite.sim import TooManyPairs
-from cutsite.sim.kmer import MinHashJaccard, stable_hash
+from splitproof import api
+from splitproof.policy import Policy
+from splitproof.sim import TooManyPairs
+from splitproof.sim.kmer import MinHashJaccard, stable_hash
 
 from conftest import make_rows, write_csv
 
@@ -21,7 +21,7 @@ PROBE = """
 import hashlib, json, sys
 sys.path.insert(0, {tests!r})
 from conftest import make_rows
-from cutsite.sim.kmer import MinHashJaccard
+from splitproof.sim.kmer import MinHashJaccard
 rows = make_rows(families=30, members=6, length=250, mutation_rate=0.02, seed=3)
 values = [row["sequence"] for row in rows]
 result = MinHashJaccard().pairs_above(values, "protein", 0.9)
@@ -92,7 +92,7 @@ def _assignment(tmp_path: Path, rows, name: str, label: bool) -> dict:
     if label:
         dataset["label"] = "activity"
     payload = {
-        "cutsite": 1,
+        "splitproof": 1,
         "dataset": dataset,
         "scheme": {"kind": "holdout", "fractions": {"train": 0.5, "test": 0.5}},
         "constraints": [

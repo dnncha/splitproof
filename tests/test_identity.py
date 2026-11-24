@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from cutsite import api
-from cutsite.evaluate import SATISFIED_UNPROVEN, VIOLATED
-from cutsite.policy import Policy
-from cutsite.sim import HEURISTIC
-from cutsite.sim.mmseqs import MMseqs2Identity
+from splitproof import api
+from splitproof.evaluate import SATISFIED_UNPROVEN, VIOLATED
+from splitproof.policy import Policy
+from splitproof.sim import HEURISTIC
+from splitproof.sim.mmseqs import MMseqs2Identity
 
 from conftest import make_rows, write_csv
 
@@ -102,7 +102,7 @@ def test_identity_audit_quantifies_the_leak_in_real_identity(identity_policy, tm
 
 
 def test_mmseqs_charges_the_pair_budget(identity_policy):
-    from cutsite.sim import TooManyPairs
+    from splitproof.sim import TooManyPairs
 
     rows = make_rows(families=6, members=5, seed=34)
     values = [row["sequence"] for row in rows]

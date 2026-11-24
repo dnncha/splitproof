@@ -7,7 +7,7 @@ from typing import List, Optional, Sequence
 
 import pytest
 
-from cutsite.sim import DEFAULT_MAX_PAIRS, PairCollector, SimilarityResult, TooManyPairs, backend_table
+from splitproof.sim import DEFAULT_MAX_PAIRS, PairCollector, SimilarityResult, TooManyPairs, backend_table
 
 from conftest import make_rows
 
@@ -31,7 +31,7 @@ def test_the_real_source_tree_is_clean():
 
 
 def test_checker_catches_a_planted_dense_materialisation(tmp_path: Path):
-    planted = tmp_path / "src" / "cutsite" / "sim"
+    planted = tmp_path / "src" / "splitproof" / "sim"
     planted.mkdir(parents=True)
     (planted / "rogue.py").write_text("def f(m):\n    return (m @ m.T).toarray()\n", encoding="utf-8")
     result = _run_checker(tmp_path)
@@ -41,7 +41,7 @@ def test_checker_catches_a_planted_dense_materialisation(tmp_path: Path):
 
 
 def test_checker_catches_a_pairset_built_outside_the_collector(tmp_path: Path):
-    planted = tmp_path / "src" / "cutsite" / "sim"
+    planted = tmp_path / "src" / "splitproof" / "sim"
     planted.mkdir(parents=True)
     (planted / "rogue.py").write_text(
         "def f(t):\n    return PairSet.from_triples(t)\n", encoding="utf-8"
@@ -52,10 +52,10 @@ def test_checker_catches_a_pairset_built_outside_the_collector(tmp_path: Path):
 
 
 def test_checker_honours_an_explicit_justification(tmp_path: Path):
-    planted = tmp_path / "src" / "cutsite" / "sim"
+    planted = tmp_path / "src" / "splitproof" / "sim"
     planted.mkdir(parents=True)
     (planted / "ok.py").write_text(
-        "def f(m):\n    return m.toarray()  # cutsite: allow-unbounded, 3x3 fixture\n", encoding="utf-8"
+        "def f(m):\n    return m.toarray()  # splitproof: allow-unbounded, 3x3 fixture\n", encoding="utf-8"
     )
     assert _run_checker(tmp_path).returncode == 0
 
@@ -104,7 +104,7 @@ def test_a_backend_that_bypasses_the_collector_is_caught_by_the_budget_test():
             *,
             max_pairs: int = DEFAULT_MAX_PAIRS,
         ) -> SimilarityResult:
-            from cutsite.sim import PairSet
+            from splitproof.sim import PairSet
 
             triples: List[tuple] = []
             for i in range(len(values)):
@@ -144,8 +144,8 @@ def test_collector_charges_blocks_as_well_as_singles():
 
 def test_crossing_pairs_are_counted_without_materialising_them(policy_dict, tmp_path: Path):
     from conftest import write_csv
-    from cutsite import api
-    from cutsite.policy import Policy
+    from splitproof import api
+    from splitproof.policy import Policy
 
     rows = make_rows(families=30, members=6, seed=14)
     for position, row in enumerate(rows):

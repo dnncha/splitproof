@@ -1,4 +1,4 @@
-# cutsite report
+# splitproof report
 
 **Status: proven**
 
@@ -6,7 +6,7 @@
 - data digest: `sha256:ee6f7f5294593cba55ebed4fcd8a33de0ace7ea96e04d8001628072889fb205b`
 - policy digest: `sha256:8aac50768045d463a6892285f82a76cf561b25079163ea1e638a1c685397e109`
 - assignment digest: `sha256:bf38f87a2c2d6d40544adff5d096212c4f07bcad82efd6ebd4d6f25f0e4478d7`
-- cutsite 0.1.0, seed 7
+- splitproof 0.1.0, seed 7
 
 ## Folds
 
@@ -61,4 +61,4 @@ Reference fold: `train`
 
 ## What this does and does not prove
 
-cutsite proves exactly the constraints the policy declares, measured by the named backend. A `proven` status means no pair at or above the declared threshold crosses folds, and the backend searched every pair. A `no violation found` status means the backend is sensitive but heuristic, so absence of a crossing pair is evidence, not proof. cutsite sets no thresholds of its own and passes no judgement on constraints you did not declare.
+splitproof proves exactly the constraints the policy declares, measured by the named backend. A `proven` status means no pair at or above the declared threshold crosses folds, and the backend searched every pair. A `no violation found` status means the backend is sensitive but heuristic, so absence of a crossing pair is evidence, not proof. splitproof sets no thresholds of its own and passes no judgement on constraints you did not declare.

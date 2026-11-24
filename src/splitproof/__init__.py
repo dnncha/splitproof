@@ -5,7 +5,7 @@ from .errors import (  # noqa: E402
     BackendUnavailable,
     CertificateMismatch,
     ConstraintViolated,
-    CutsiteError,
+    SplitproofError,
     DataError,
     GiantUnit,
     InfeasibleSplit,
@@ -18,7 +18,7 @@ from .policy import Policy  # noqa: E402
 __all__ = [
     "__version__",
     "Policy",
-    "CutsiteError",
+    "SplitproofError",
     "PolicyError",
     "DataError",
     "BackendUnavailable",
@@ -40,4 +40,4 @@ def __getattr__(name: str):
         from . import api
 
         return getattr(api, name)
-    raise AttributeError(f"module 'cutsite' has no attribute {name!r}")
+    raise AttributeError(f"module 'splitproof' has no attribute {name!r}")

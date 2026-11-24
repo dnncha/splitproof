@@ -43,9 +43,9 @@ jobs:
       - name: end to end on real sequence identity
         working-directory: examples
         run: |
-          python -m cutsite.cli split proteins-identity.yaml --out id.csv --cert id.json
-          python -m cutsite.cli verify id.json --split id.csv
-          if python -m cutsite.cli audit proteins-identity.yaml --split-column fold_random >/dev/null; then
+          python -m splitproof.cli split proteins-identity.yaml --out id.csv --cert id.json
+          python -m splitproof.cli verify id.json --split id.csv
+          if python -m splitproof.cli audit proteins-identity.yaml --split-column fold_random >/dev/null; then
             echo "the random split should have failed the identity audit, and did not" >&2
             exit 1
           fi

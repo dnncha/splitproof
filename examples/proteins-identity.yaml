@@ -1,4 +1,4 @@
-cutsite: 1
+splitproof: 1
 dataset:
   path: proteins.csv
   id: accession

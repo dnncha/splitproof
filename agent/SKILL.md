@@ -1,16 +1,16 @@
 ---
-name: cutsite
+name: splitproof
 description: Build, audit and prove leakage-free train/test splits for biological data. Use whenever you are about to split a biological dataset, whenever you are handed a benchmark split you did not build, and whenever a model score on biological data looks surprisingly good.
 ---
 
-# cutsite
+# splitproof
 
 A random train/test split on biological data is almost always wrong, because the rows
 are not independent. Test proteins are homologs of training proteins. Test compounds
 share scaffolds with training compounds. Test cells come from a training donor, plate or
 site. A model that exploits that overlap scores well and has learned nothing.
 
-`cutsite` makes a split a provable artifact: you declare what must not leak, it builds a
+`splitproof` makes a split a provable artifact: you declare what must not leak, it builds a
 split that honours the declaration, and it writes a certificate anyone can re-verify.
 
 ## When to reach for it
@@ -19,7 +19,7 @@ split that honours the declaration, and it writes a certificate anyone can re-ve
 - **On arrival** of any benchmark split you did not build yourself. Audit it before you
   trust a single number from it.
 - **When a score looks too good.** Compare it against the nearest-neighbour baseline that
-  `cutsite audit` reports. That is the floor; a model below or near it has learned nothing.
+  `splitproof audit` reports. That is the floor; a model below or near it has learned nothing.
 - **In CI**, so a split cannot drift without the build going red.
 
 Do not use it for splitting data whose rows genuinely are independent and exchangeable.
@@ -27,10 +27,10 @@ Do not use it for splitting data whose rows genuinely are independent and exchan
 ## The loop
 
 ```sh
-cutsite init data.csv --out policy.yaml     # guesses columns; read and correct it
-cutsite units policy.yaml                   # how much independent data do you actually have?
-cutsite split policy.yaml --report split.md # build and certify
-cutsite verify cutsite.cert.json --split split.csv
+splitproof init data.csv --out policy.yaml     # guesses columns; read and correct it
+splitproof units policy.yaml                   # how much independent data do you actually have?
+splitproof split policy.yaml --report split.md # build and certify
+splitproof verify splitproof.cert.json --split split.csv
 ```
 
 Every command takes `--json` and returns a stable schema with a `summary` field written
@@ -46,7 +46,7 @@ Check `status` on every constraint, not just the overall result:
   *found*. That is evidence, not proof. Pass `--require-exact` in CI if you need proof.
 - `violated` — a declared constraint is broken. `examples` lists the worst offenders.
 
-`cutsite` never invents a threshold. It fails only on constraints you wrote down, so a
+`splitproof` never invents a threshold. It fails only on constraints you wrote down, so a
 clean result means exactly what your policy said and nothing more.
 
 ## The three numbers that matter
@@ -66,10 +66,10 @@ From `split` or `audit`:
 
 - **`GIANT_UNIT`** — the data is one homology blob at the declared threshold, so a balanced
   split does not exist. Do not lower the threshold just to make it pass; that is choosing
-  leakage. Run `cutsite units`, report the blob to the user, and consider
+  leakage. Run `splitproof units`, report the blob to the user, and consider
   `scheme.kind: leave-unit-out`.
 - **`BACKEND_UNAVAILABLE` for `identity`** — MMseqs2 is not installed. Either install it or
-  switch to `metric: kmer_jaccard`, which cutsite computes exactly. Do not call k-mer
+  switch to `metric: kmer_jaccard`, which splitproof computes exactly. Do not call k-mer
   Jaccard "identity" in anything you write.
 - **Empty fold / `SPLIT_INFEASIBLE`** — there are fewer independent units than folds.
 - **A unit spans a temporal cutoff** — decide deliberately via `on_span`; the default
@@ -77,15 +77,15 @@ From `split` or `audit`:
 
 ## MCP
 
-`cutsite mcp` serves the same operations over stdio as `cutsite_init`, `cutsite_split`,
-`cutsite_audit`, `cutsite_verify`, `cutsite_units` and `cutsite_explain`.
+`splitproof mcp` serves the same operations over stdio as `splitproof_init`, `splitproof_split`,
+`splitproof_audit`, `splitproof_verify`, `splitproof_units` and `splitproof_explain`.
 
 ```json
-{ "mcpServers": { "cutsite": { "command": "cutsite", "args": ["mcp"] } } }
+{ "mcpServers": { "splitproof": { "command": "splitproof", "args": ["mcp"] } } }
 ```
 
 ## Scope
 
-`cutsite` is evaluation infrastructure for clinical genomics, cell biology, ADMET and
+`splitproof` is evaluation infrastructure for clinical genomics, cell biology, ADMET and
 toxicology, imaging and proteomics. It measures and constrains. It hosts no optimisation
 loop and no screening oracle, and it should not be wired into one.

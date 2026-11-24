@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from cutsite import api
-from cutsite.evaluate import SATISFIED, VIOLATED
-from cutsite.policy import Policy
-from cutsite.sim import EXACT, TooManyPairs
-from cutsite.sim.chem import MorganTanimoto, RingSystems
+from splitproof import api
+from splitproof.evaluate import SATISFIED, VIOLATED
+from splitproof.policy import Policy
+from splitproof.sim import EXACT, TooManyPairs
+from splitproof.sim.chem import MorganTanimoto, RingSystems
 
 rdkit = pytest.importorskip("rdkit", reason="RDKit is not installed on this machine")
 
@@ -36,7 +36,7 @@ def _write(path: Path, groups) -> Path:
 
 def _policy(path: Path, metric: str, threshold: float):
     return {
-        "cutsite": 1,
+        "splitproof": 1,
         "dataset": {
             "path": str(path),
             "id": "id",
@@ -144,7 +144,7 @@ def test_tanimoto_charges_the_pair_budget_but_scaffold_needs_no_pairs():
 
 
 def test_an_acyclic_only_dataset_refuses_rather_than_passing_vacuously(tmp_path: Path):
-    from cutsite.errors import VacuousConstraint
+    from splitproof.errors import VacuousConstraint
 
     path = _write(tmp_path / "alkanes.csv", [("alk", ALKANES)])
     with pytest.raises(VacuousConstraint) as error:
@@ -156,7 +156,7 @@ def test_an_acyclic_only_dataset_refuses_rather_than_passing_vacuously(tmp_path:
 def test_ring_systems_ignore_halogen_and_smiles_ordering():
     from rdkit import Chem
 
-    from cutsite.sim.chem import ring_systems
+    from splitproof.sim.chem import ring_systems
 
     keys = {ring_systems(Chem, Chem.MolFromSmiles(s)) for s in BENZODIAZEPINES}
     assert len(keys) == 1
@@ -165,7 +165,7 @@ def test_ring_systems_ignore_halogen_and_smiles_ordering():
 def test_ring_systems_are_none_for_a_molecule_with_no_rings():
     from rdkit import Chem
 
-    from cutsite.sim.chem import ring_systems
+    from splitproof.sim.chem import ring_systems
 
     assert ring_systems(Chem, Chem.MolFromSmiles("CCCC")) is None
 
@@ -214,7 +214,7 @@ def test_ring_systems_survives_real_drugs(name, smiles):
     """
     from rdkit import Chem
 
-    from cutsite.sim.chem import ring_systems
+    from splitproof.sim.chem import ring_systems
 
     molecule = Chem.MolFromSmiles(smiles)
     assert molecule is not None, name
@@ -230,7 +230,7 @@ def test_every_real_drug_goes_through_the_backend_without_failing():
 
 
 def test_an_equivalence_metric_refuses_a_threshold_below_one(tmp_path: Path):
-    from cutsite.errors import PolicyError
+    from splitproof.errors import PolicyError
 
     path = _write(tmp_path / "m.csv", [("bzd", BENZODIAZEPINES)])
     payload = _policy(path, "ring_systems", 1.0)

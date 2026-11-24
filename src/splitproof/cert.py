@@ -44,7 +44,7 @@ def build(
 ) -> Dict[str, Any]:
     policy_payload = policy.to_dict()
     return {
-        "cutsite": {"schema": SCHEMA, "version": __version__},
+        "splitproof": {"schema": SCHEMA, "version": __version__},
         "created": created or _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat(),
         "status": overall_status(reports),
         "policy": policy_payload,
@@ -80,25 +80,25 @@ def read(path: Path) -> Dict[str, Any]:
     except (OSError, json.JSONDecodeError) as exc:
         raise CertificateMismatch(
             f"could not read certificate {path}",
-            remedy="Pass the cutsite.cert.json produced by 'cutsite split'.",
+            remedy="Pass the splitproof.cert.json produced by 'splitproof split'.",
             details={"path": str(path)},
         ) from exc
-    if not isinstance(loaded, dict) or "cutsite" not in loaded:
+    if not isinstance(loaded, dict) or "splitproof" not in loaded:
         raise CertificateMismatch(
-            f"{path} is not a cutsite certificate",
+            f"{path} is not a splitproof certificate",
             details={"path": str(path)},
         )
-    header = loaded.get("cutsite")
+    header = loaded.get("splitproof")
     if not isinstance(header, dict) or not isinstance(header.get("schema"), int):
         raise CertificateMismatch(
-            f"{path} has no readable cutsite schema header",
-            remedy="Pass the cutsite.cert.json produced by 'cutsite split'.",
+            f"{path} has no readable splitproof schema header",
+            remedy="Pass the splitproof.cert.json produced by 'splitproof split'.",
             details={"path": str(path), "header": str(header)},
         )
     schema = header["schema"]
     if schema != SCHEMA:
         raise CertificateMismatch(
-            f"certificate schema {schema} is not supported by cutsite {__version__}",
+            f"certificate schema {schema} is not supported by splitproof {__version__}",
             remedy=f"This build reads schema {SCHEMA}.",
             details={"schema": schema, "supported": SCHEMA},
         )
@@ -128,7 +128,7 @@ def policy_from(certificate: Dict[str, Any]) -> Policy:
 VOLATILE = ("created", "environment", "audited", "source")
 
 SECTIONS = (
-    ("cutsite", "the certificate was produced by this build of cutsite"),
+    ("splitproof", "the certificate was produced by this build of splitproof"),
     ("policy", "the embedded policy is the one being verified against"),
     ("policy_digest", "the policy still hashes to the recorded digest"),
     ("dataset", "the data holds the same ids and values the split was built from"),

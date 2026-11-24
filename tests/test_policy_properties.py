@@ -7,8 +7,8 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from cutsite.errors import CutsiteError, PolicyError
-from cutsite.policy import Policy
+from splitproof.errors import SplitproofError, PolicyError
+from splitproof.policy import Policy
 
 SETTINGS = settings(
     max_examples=300,
@@ -38,7 +38,7 @@ structures = st.recursive(
 )
 
 BASE: Dict[str, Any] = {
-    "cutsite": 1,
+    "splitproof": 1,
     "dataset": {
         "path": "data.csv",
         "id": "accession",
@@ -55,7 +55,7 @@ BASE: Dict[str, Any] = {
 }
 
 PATHS = [
-    ("cutsite",),
+    ("splitproof",),
     ("seed",),
     ("dataset",),
     ("dataset", "id"),
@@ -92,7 +92,7 @@ def test_arbitrary_top_level_input_is_rejected_not_crashed(payload):
     except PolicyError as error:
         assert error.message
         assert error.code == "POLICY_INVALID"
-    except CutsiteError as error:
+    except SplitproofError as error:
         assert error.message
 
 

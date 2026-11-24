@@ -25,9 +25,9 @@ from typing import List, Tuple
 DENSE = re.compile(r"\.(toarray|todense)\s*\(")
 DIRECT_PAIRSET = re.compile(r"PairSet\.(from_triples|from_blocks)\s*\(")
 
-COLLECTOR_HOME = Path("src/cutsite/sim/__init__.py")
+COLLECTOR_HOME = Path("src/splitproof/sim/__init__.py")
 
-ALLOW = "cutsite: allow-unbounded"
+ALLOW = "splitproof: allow-unbounded"
 
 
 def scan(root: Path) -> List[Tuple[Path, int, str, str]]:

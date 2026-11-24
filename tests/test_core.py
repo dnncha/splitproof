@@ -6,14 +6,14 @@ from typing import Dict
 
 import pytest
 
-from cutsite import api, cert as cert_module, dataset as dataset_module, units as units_module
-from cutsite.assign import DROPPED
-from cutsite.errors import DataError, GiantUnit, PolicyError
-from cutsite.evaluate import SATISFIED, VIOLATED
-from cutsite.policy import Policy
-from cutsite.sim.kmer import ExactJaccard, MinHashJaccard, tokenise
-from cutsite.sim.mmseqs import parse_search_tsv
-from cutsite.units import UnionFind
+from splitproof import api, cert as cert_module, dataset as dataset_module, units as units_module
+from splitproof.assign import DROPPED
+from splitproof.errors import DataError, GiantUnit, PolicyError
+from splitproof.evaluate import SATISFIED, VIOLATED
+from splitproof.policy import Policy
+from splitproof.sim.kmer import ExactJaccard, MinHashJaccard, tokenise
+from splitproof.sim.mmseqs import parse_search_tsv
+from splitproof.units import UnionFind
 
 from conftest import make_rows, write_csv
 
@@ -249,7 +249,7 @@ def test_verify_accepts_an_untouched_split(policy_dict, tmp_path: Path):
     policy = Policy.from_dict(policy_dict)
     outcome = api.make_split(policy)
     split_path = tmp_path / "split.csv"
-    cert_path = tmp_path / "cutsite.cert.json"
+    cert_path = tmp_path / "splitproof.cert.json"
     api.write_split(split_path, outcome.data, outcome.assignment, "accession")
     cert_module.write(cert_path, outcome.certificate)
     result = api.verify(cert_path, split_path=split_path)
@@ -261,7 +261,7 @@ def test_verify_rejects_a_swapped_assignment(policy_dict, tmp_path: Path):
     policy = Policy.from_dict(policy_dict)
     outcome = api.make_split(policy)
     split_path = tmp_path / "split.csv"
-    cert_path = tmp_path / "cutsite.cert.json"
+    cert_path = tmp_path / "splitproof.cert.json"
     api.write_split(split_path, outcome.data, outcome.assignment, "accession")
     cert_module.write(cert_path, outcome.certificate)
     lines = split_path.read_text(encoding="utf-8").splitlines()
@@ -280,7 +280,7 @@ def test_verify_rejects_edited_data(policy_dict, tmp_path: Path):
     policy = Policy.from_dict(policy_dict)
     outcome = api.make_split(policy)
     split_path = tmp_path / "split.csv"
-    cert_path = tmp_path / "cutsite.cert.json"
+    cert_path = tmp_path / "splitproof.cert.json"
     api.write_split(split_path, outcome.data, outcome.assignment, "accession")
     cert_module.write(cert_path, outcome.certificate)
     data_path = Path(policy_dict["dataset"]["path"])
@@ -340,7 +340,7 @@ def _certified(policy_dict, tmp_path: Path):
     policy = Policy.from_dict(policy_dict)
     outcome = api.make_split(policy)
     split_path = tmp_path / "split.csv"
-    cert_path = tmp_path / "cutsite.cert.json"
+    cert_path = tmp_path / "splitproof.cert.json"
     api.write_split(split_path, outcome.data, outcome.assignment, "accession")
     cert_module.write(cert_path, outcome.certificate)
     return outcome, split_path, cert_path

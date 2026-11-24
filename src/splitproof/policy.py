@@ -370,7 +370,7 @@ class Policy:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "cutsite": self.version,
+            "splitproof": self.version,
             "dataset": self.dataset.to_dict(),
             "scheme": self.scheme.to_dict(),
             "constraints": [c.to_dict() for c in self.constraints],
@@ -381,11 +381,11 @@ class Policy:
     def from_dict(raw: Dict[str, Any], *, source_path: Optional[Path] = None) -> "Policy":
         if not isinstance(raw, dict):
             raise PolicyError("policy must be a mapping at the top level")
-        version = _as_int(raw.get("cutsite", POLICY_VERSION), "policy.cutsite")
+        version = _as_int(raw.get("splitproof", POLICY_VERSION), "policy.splitproof")
         if version != POLICY_VERSION:
             raise PolicyError(
-                f"policy version {version} is not supported by this cutsite build",
-                remedy=f"Set 'cutsite: {POLICY_VERSION}' or upgrade cutsite.",
+                f"policy version {version} is not supported by this splitproof build",
+                remedy=f"Set 'splitproof: {POLICY_VERSION}' or upgrade splitproof.",
                 details={"value": version, "supported": POLICY_VERSION},
             )
         dataset = DatasetSpec.parse(_require(raw, "dataset", "policy"))
@@ -424,7 +424,7 @@ def _parse_structured(text: str, path: Path) -> Dict[str, Any]:
     except ModuleNotFoundError as exc:
         raise PolicyError(
             "reading a YAML policy needs PyYAML",
-            remedy="Install cutsite normally (pip install cutsite) or use a .json policy.",
+            remedy="Install splitproof normally (pip install splitproof) or use a .json policy.",
         ) from exc
     loaded = yaml.safe_load(text)
     if loaded is None:

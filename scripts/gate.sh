@@ -22,9 +22,9 @@ echo "== end to end =="
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 cd examples
-"$PYTHON" -m cutsite.cli split proteins.yaml --out "$WORK/s.csv" --cert "$WORK/c.json" --require-exact
-"$PYTHON" -m cutsite.cli verify "$WORK/c.json" --split "$WORK/s.csv"
-if "$PYTHON" -m cutsite.cli audit proteins.yaml --split-column fold_random --no-neighbours >/dev/null; then
+"$PYTHON" -m splitproof.cli split proteins.yaml --out "$WORK/s.csv" --cert "$WORK/c.json" --require-exact
+"$PYTHON" -m splitproof.cli verify "$WORK/c.json" --split "$WORK/s.csv"
+if "$PYTHON" -m splitproof.cli audit proteins.yaml --split-column fold_random --no-neighbours >/dev/null; then
   echo "gate: the random split audit should have failed, and did not" >&2
   exit 1
 fi

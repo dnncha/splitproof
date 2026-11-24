@@ -6,17 +6,17 @@ from typing import Dict
 
 import pytest
 
-from cutsite import api
-from cutsite.errors import PolicyError
-from cutsite.evaluate import SATISFIED, VIOLATED
-from cutsite.policy import Policy
+from splitproof import api
+from splitproof.errors import PolicyError
+from splitproof.evaluate import SATISFIED, VIOLATED
+from splitproof.policy import Policy
 
 from conftest import make_rows, write_csv
 
 
 def _policy(path: Path, **over) -> Dict:
     base = {
-        "cutsite": 1,
+        "splitproof": 1,
         "dataset": {
             "path": str(path),
             "id": "accession",
@@ -49,7 +49,7 @@ def _straddling(tmp_path: Path) -> Path:
     return write_csv(tmp_path / "straddle.csv", rows)
 
 
-def test_a_split_cutsite_built_passes_its_own_temporal_check(tmp_path: Path):
+def test_a_split_splitproof_built_passes_its_own_temporal_check(tmp_path: Path):
     payload = _policy(_straddling(tmp_path))
     payload["constraints"].append(
         {"kind": "temporal", "key": "deposited", "cutoff": "2025-01-01"}
@@ -91,7 +91,7 @@ def test_an_early_item_in_test_is_not_a_temporal_violation(tmp_path: Path):
 
 
 def test_a_temporal_audit_refuses_a_split_without_the_guarded_fold(tmp_path: Path):
-    from cutsite.errors import VacuousConstraint
+    from splitproof.errors import VacuousConstraint
 
     rows = make_rows(families=6, members=2, seed=24)
     for row in rows:
@@ -117,7 +117,7 @@ def test_on_span_train_is_refused_as_self_contradictory(tmp_path: Path):
 
 
 def test_an_all_blank_group_column_is_refused(tmp_path: Path):
-    from cutsite.errors import VacuousConstraint
+    from splitproof.errors import VacuousConstraint
 
     rows = make_rows(families=6, members=3, seed=25)
     for row in rows:
@@ -132,7 +132,7 @@ def test_an_all_blank_group_column_is_refused(tmp_path: Path):
 
 
 def test_an_all_blank_date_column_is_refused(tmp_path: Path):
-    from cutsite.errors import VacuousConstraint
+    from splitproof.errors import VacuousConstraint
 
     rows = make_rows(families=6, members=3, seed=26)
     for row in rows:
@@ -215,7 +215,7 @@ def test_backend_parameters_are_part_of_the_policy_digest(tmp_path: Path):
 
 
 def test_an_unknown_backend_parameter_is_refused(tmp_path: Path):
-    from cutsite.errors import BackendUnavailable
+    from splitproof.errors import BackendUnavailable
 
     rows = make_rows(families=6, members=3, seed=34)
     path = write_csv(tmp_path / "bad.csv", rows)

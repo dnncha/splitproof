@@ -103,7 +103,7 @@ class ExactJaccard(SimilarityBackend):
         return f"scipy-{scipy.__version__}"
 
     def install_hint(self) -> str:
-        return "pip install cutsite (scipy is a core dependency)"
+        return "pip install splitproof (scipy is a core dependency)"
 
     def pairs_above(
         self,
@@ -225,7 +225,7 @@ class MinHashJaccard(SimilarityBackend):
         return f"builtin-minhash-{self.num_perm}"
 
     def install_hint(self) -> str:
-        return "pip install cutsite"
+        return "pip install splitproof"
 
     def _bands(self, threshold: float) -> Tuple[int, int]:
         best = (1, self.num_perm)

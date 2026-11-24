@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, TextIO
 from . import __version__, api, cert as cert_module, dataset as dataset_module
 from . import report as report_module
 from . import units as units_module
-from .errors import CutsiteError
+from .errors import SplitproofError
 from .policy import Policy
 
 FALLBACK_PROTOCOL = "2025-06-18"
@@ -33,15 +33,15 @@ def _tool(name: str, description: str, properties: Dict[str, Any], required: Lis
 
 TOOLS: List[Dict[str, Any]] = [
     _tool(
-        "cutsite_init",
-        "Inspect a data file and write a starter cutsite policy, guessing the id column, "
+        "splitproof_init",
+        "Inspect a data file and write a starter splitproof policy, guessing the id column, "
         "similarity keys, group columns and date columns. A guess is not a policy: read it "
         "and correct it before trusting a split built from it.",
         {"data": STRING, "out": STRING, "id_column": STRING},
         ["data"],
     ),
     _tool(
-        "cutsite_split",
+        "splitproof_split",
         "Build a leakage-free split from a policy and write a certificate proving it. Returns "
         "the fold sizes, the per-constraint status, the unit structure and the leakage "
         "diagnostics. A 'satisfied' status means every pair at or above the declared threshold "
@@ -60,7 +60,7 @@ TOOLS: List[Dict[str, Any]] = [
         ["policy"],
     ),
     _tool(
-        "cutsite_audit",
+        "splitproof_audit",
         "Measure leakage in a split that already exists, such as a published benchmark's "
         "train/test column. Returns the crossing pairs ranked by similarity, the "
         "nearest-neighbour similarity distribution, and the nearest-neighbour baseline score "
@@ -77,7 +77,7 @@ TOOLS: List[Dict[str, Any]] = [
         ["policy"],
     ),
     _tool(
-        "cutsite_verify",
+        "splitproof_verify",
         "Re-prove a certificate against the data and the split. Recomputes the data digest, the "
         "assignment digest and every constraint measurement, and reports which checks failed. "
         "Use this to confirm a split has not drifted since it was certified.",
@@ -85,7 +85,7 @@ TOOLS: List[Dict[str, Any]] = [
         ["cert"],
     ),
     _tool(
-        "cutsite_units",
+        "splitproof_units",
         "Report the independent units a policy implies, without building a split: how many "
         "units exist, how large the biggest one is, and what fraction of the data it holds. "
         "Use this first when a split is refused as infeasible.",
@@ -93,7 +93,7 @@ TOOLS: List[Dict[str, Any]] = [
         ["policy"],
     ),
     _tool(
-        "cutsite_explain",
+        "splitproof_explain",
         "Summarise an existing certificate in plain language, or as Markdown.",
         {"cert": STRING, "markdown": BOOLEAN},
         ["cert"],
@@ -121,7 +121,7 @@ def _summarise(certificate: Dict[str, Any], extra: Optional[Dict[str, Any]] = No
 def _do_init(arguments: Dict[str, Any]) -> Dict[str, Any]:
     from .cli import guess_policy, _write_policy
 
-    out = Path(arguments.get("out") or "cutsite.yaml")
+    out = Path(arguments.get("out") or "policy.yaml")
     policy, seen = guess_policy(Path(arguments["data"]), arguments.get("id_column"))
     _write_policy(out, policy)
     return {
@@ -146,7 +146,7 @@ def _do_split(arguments: Dict[str, Any]) -> Dict[str, Any]:
         skip_neighbours=bool(arguments.get("skip_neighbours", False)),
     )
     out = Path(arguments.get("out") or "split.csv")
-    certificate_path = Path(arguments.get("cert") or "cutsite.cert.json")
+    certificate_path = Path(arguments.get("cert") or "splitproof.cert.json")
     api.write_split(out, outcome.data, outcome.assignment, policy.dataset.id_column)
     cert_module.write(certificate_path, outcome.certificate)
     if arguments.get("report"):
@@ -207,12 +207,12 @@ def _do_explain(arguments: Dict[str, Any]) -> Dict[str, Any]:
 
 
 HANDLERS: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
-    "cutsite_init": _do_init,
-    "cutsite_split": _do_split,
-    "cutsite_audit": _do_audit,
-    "cutsite_verify": _do_verify,
-    "cutsite_units": _do_units,
-    "cutsite_explain": _do_explain,
+    "splitproof_init": _do_init,
+    "splitproof_split": _do_split,
+    "splitproof_audit": _do_audit,
+    "splitproof_verify": _do_verify,
+    "splitproof_units": _do_units,
+    "splitproof_explain": _do_explain,
 }
 
 
@@ -226,7 +226,7 @@ def call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     try:
         payload = handler(arguments)
         failed = payload.get("ok") is False
-    except CutsiteError as error:
+    except SplitproofError as error:
         payload = {"ok": False, "error": error.to_dict()}
         failed = True
     except (OSError, ValueError, KeyError) as error:
@@ -249,12 +249,12 @@ def handle(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             {
                 "protocolVersion": requested,
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "cutsite", "version": __version__},
+                "serverInfo": {"name": "splitproof", "version": __version__},
                 "instructions": (
-                    "cutsite builds, audits and proves leakage-free train/test splits for "
-                    "biological data. Start with cutsite_init on a data file, correct the "
-                    "guessed policy, then cutsite_split. Audit any split you did not build "
-                    "yourself with cutsite_audit and treat its nearest-neighbour baseline as "
+                    "splitproof builds, audits and proves leakage-free train/test splits for "
+                    "biological data. Start with splitproof_init on a data file, correct the "
+                    "guessed policy, then splitproof_split. Audit any split you did not build "
+                    "yourself with splitproof_audit and treat its nearest-neighbour baseline as "
                     "the score a model must beat."
                 ),
             },
