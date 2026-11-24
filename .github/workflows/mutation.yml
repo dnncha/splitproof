@@ -32,6 +32,16 @@ jobs:
           mutmut results > survivors.txt || true
           cat survivors.txt
           echo "count=$(grep -c ': survived' survivors.txt || true)" >> "$GITHUB_OUTPUT"
+          grep ': survived' survivors.txt | awk -F: '{print $1}' | tr -d ' ' | while read -r name; do
+            echo "=== $name"
+            mutmut show "$name"
+          done > survivor-diffs.txt || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: survivors
+          path: |
+            survivors.txt
+            survivor-diffs.txt
       - name: report survivors to an issue
         if: steps.survivors.outputs.count != '0'
         env:
