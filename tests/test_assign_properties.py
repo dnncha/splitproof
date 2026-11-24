@@ -50,3 +50,60 @@ def test_every_fold_lands_within_one_unit_of_its_target(tmp_path_factory, instan
         assert abs(stat.count - stat.target) <= largest, (sizes, weights, stat)
     if len(sizes) >= len(names):
         assert all(stat.count > 0 for stat in outcome.assignment.stats), (sizes, weights)
+
+
+
+def _cost(counts, targets):
+    return round(sum(((counts[n] - targets[n]) / max(targets[n], 1)) ** 2 for n in targets), 9)
+
+
+@settings(max_examples=120, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(instance=_instances())
+def test_no_single_move_or_swap_improves_the_allocation(tmp_path_factory, instance):
+    sizes, weights, seed = instance
+    work = tmp_path_factory.mktemp("local")
+    path = work / "d.csv"
+    with path.open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["id", "grp"])
+        for unit, size in enumerate(sizes):
+            for member in range(size):
+                writer.writerow([f"u{unit}m{member}", f"g{unit}"])
+    names = ["train", "test", "valid"][: len(weights)]
+    policy = Policy.from_dict(
+        {
+            "splitproof": 1,
+            "dataset": {"path": str(path), "id": "id", "groups": ["grp"]},
+            "scheme": {"kind": "holdout", "fractions": dict(zip(names, weights, strict=True))},
+            "constraints": [{"kind": "disjoint", "key": "grp"}],
+            "seed": seed,
+        }
+    )
+    try:
+        outcome = api.make_split(policy, skip_neighbours=True, tolerance=10.0)
+    except Exception as error:
+        assert getattr(error, "code", "") in {"SPLIT_INFEASIBLE", "GIANT_UNIT"}, error
+        return
+    targets = {stat.name: stat.target for stat in outcome.assignment.stats}
+    counts = {stat.name: stat.count for stat in outcome.assignment.stats}
+    members = {name: [] for name in names}
+    fold_of = outcome.assignment.fold_of
+    for unit, size in enumerate(sizes):
+        first_row = sum(sizes[:unit])
+        members[fold_of[first_row]].append(size)
+    current = _cost(counts, targets)
+    for source in names:
+        for size in set(members[source]):
+            for destination in names:
+                if destination == source:
+                    continue
+                if len(members[source]) > 1:
+                    moved = dict(counts)
+                    moved[source] -= size
+                    moved[destination] += size
+                    assert _cost(moved, targets) >= current, ("move", size, source, destination, counts)
+                for other in set(members[destination]):
+                    swapped = dict(counts)
+                    swapped[source] += other - size
+                    swapped[destination] += size - other
+                    assert _cost(swapped, targets) >= current, ("swap", size, other, counts)
