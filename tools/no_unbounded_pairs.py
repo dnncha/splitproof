@@ -20,6 +20,12 @@ Two patterns are refused anywhere under src/:
                             was quadratic this way, minutes at 470k rows. Build
                             the default once, outside the loop.
 
+  f"{key}@{x:g}"            an f-string with a :g field and no words is a value
+                            or an identifier, not a message, and :g keeps six
+                            significant figures: it once collided two constraint
+                            ids and once rounded an MMseqs2 threshold up past the
+                            declared one. Messages, which have words, are fine.
+
   PairSet.from_triples / from_blocks outside sim/__init__.py
                             bypasses PairCollector, which is the only thing that
                             charges the pair budget. A backend that builds a
@@ -36,6 +42,16 @@ from typing import List, Tuple
 
 DENSE = re.compile(r"\.(toarray|todense)\s*\(")
 EAGER_SIZED_DEFAULT = re.compile(r"\.get\([^()]*,\s*\[[^\]]*\]\s*\*")
+FSTRING = re.compile(r"""f(["'])(.*?)\1""")
+FIELD = re.compile(r"\{[^{}]*\}")
+LOSSY_FIELD = re.compile(r"\{[^{}]*:[^{}]*g\}")
+
+
+def _lossy_value(line: str) -> bool:
+    for _quote, body in FSTRING.findall(line):
+        if LOSSY_FIELD.search(body) and not re.search(r"[A-Za-z ]", FIELD.sub("", body)):
+            return True
+    return False
 WHOLE_ARRAY_TO_PYTHON = re.compile(r"\.tolist\s*\(")
 DIRECT_PAIRSET = re.compile(r"PairSet\.(from_triples|from_blocks)\s*\(")
 
@@ -59,6 +75,15 @@ def scan(root: Path) -> List[Tuple[Path, int, str, str]]:
                         "dense-materialisation",
                         "builds a dense block that grows with the product of two input sizes; "
                         "work on the sparse nonzeros instead",
+                    )
+                )
+            if _lossy_value(line):
+                findings.append(
+                    (
+                        relative,
+                        number,
+                        "lossy-float-value",
+                        "formats a number with :g as a value; use repr(float(x)) or full precision",
                     )
                 )
             if EAGER_SIZED_DEFAULT.search(line):

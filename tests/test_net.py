@@ -76,6 +76,22 @@ def test_checker_catches_an_n_sized_default_built_per_row(tmp_path: Path):
     assert "dataset.py:2" in result.stderr
 
 
+def test_checker_catches_a_number_formatted_lossily_as_a_value(tmp_path: Path):
+    planted = tmp_path / "src" / "splitproof" / "sim"
+    planted.mkdir(parents=True)
+    (planted / "tool.py").write_text(
+        "def f(t, k):\n    message = f'threshold {t:g} is fine in text'\n    return ['--min-seq-id', f\"{t:g}\"]\n"
+        "def g(k, m, t):\n    return f'{k}:{m}@{t:g}'\n",
+        encoding="utf-8",
+    )
+    result = _run_checker(tmp_path)
+    assert result.returncode == 1
+    assert "lossy-float-value" in result.stderr
+    assert "tool.py:3" in result.stderr
+    assert "tool.py:5" in result.stderr
+    assert "tool.py:2" not in result.stderr
+
+
 def test_checker_honours_an_explicit_justification(tmp_path: Path):
     planted = tmp_path / "src" / "splitproof" / "sim"
     planted.mkdir(parents=True)
