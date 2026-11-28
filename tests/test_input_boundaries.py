@@ -198,3 +198,30 @@ def test_split_does_not_treat_an_assignment_as_a_generated_header(tmp_path: Path
     split.write_text(f"{first_row}\na,test\nb,train\n", encoding="utf-8")
     with pytest.raises(DataError):
         api.load_assignment(load(path, "accession"), split_path=split)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement", "diagnostic"),
+    [
+        ("splitproof", {"schema": True}, "no readable splitproof schema header"),
+        ("splitproof", {"schema": 2}, "certificate schema 2 is not supported"),
+        ("assignment", [], "no readable 'assignment' section"),
+        ("constraints", {}, "no readable 'constraints' section"),
+        ("dataset", [], "no readable 'dataset' section"),
+        ("diagnostics", [], "no readable 'diagnostics' section"),
+        ("policy", [], "no readable 'policy' section"),
+        ("status", None, "no readable 'status' section"),
+        ("units", [], "no readable 'units' section"),
+    ],
+)
+def test_certificate_reader_refuses_invalid_schema_fields(
+    tmp_path: Path, field: str, replacement: object, diagnostic: str
+) -> None:
+    path = tmp_path / "certificate.json"
+    payload = {
+        "splitproof": {"schema": 1}, "assignment": {}, "constraints": [], "dataset": {},
+        "diagnostics": {}, "policy": {}, "status": "satisfied", "units": {},
+    }
+    path.write_text(json.dumps({**payload, field: replacement}), encoding="utf-8")
+    with pytest.raises(CertificateMismatch, match=diagnostic):
+        cert.read(path)

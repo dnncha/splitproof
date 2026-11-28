@@ -197,12 +197,14 @@ def test_audit_fold_check_refuses_exactly_the_ungradable_splits(folds, allow_dro
 
 
 def test_crossing_fold_pairs_have_distinct_keys_in_both_backends():
-    ids = ["a", "b", "c", "d", "e", "f"]
-    folds = ["a", "b|c", "a|b", "c", "fold2", "fold10"]
+    ids = ["a", "b", "c", "d", "e", "f", "g", "h"]
+    folds = ["a", "b|c", "a|b", "c", "fold2", "fold10", "a", "b%7Cc"]
     data = Dataset(ids=ids, columns={"id": ids})
-    assignment = Assignment(fold_of=dict(enumerate(folds)), folds=sorted(folds, key=fold_order), stats=[])
-    labels = ["one", "one", "two", "two", "three", "three"]
-    result = SimpleNamespace(pairs=PairSet.from_triples([(0, 1, 1.0), (2, 3, 1.0), (4, 5, 1.0)]))
-    expected = {"a|b%7Cc": 1, "a%7Cb|c": 1, "fold2|fold10": 1}
+    assignment = Assignment(fold_of=dict(enumerate(folds)), folds=sorted(set(folds), key=fold_order), stats=[])
+    labels = ["one", "one", "two", "two", "three", "three", "four", "four"]
+    result = SimpleNamespace(pairs=PairSet.from_triples([
+        (0, 1, 1.0), (2, 3, 1.0), (4, 5, 1.0), (6, 7, 1.0),
+    ]))
+    expected = {"a|b%7Cc": 1, "a%7Cb|c": 1, "a|b%257Cc": 1, "fold2|fold10": 1}
     assert evaluate._crossing_classes(labels, data, assignment)[-1] == expected
     assert evaluate._crossing(result, data, assignment)[-1] == expected
