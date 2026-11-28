@@ -71,20 +71,20 @@ markers = ["binary: runs an external program such as MMseqs2; the gate runs thes
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["F", "E9", "B", "PLE", "PLW", "RUF012", "TID251"]
+select = ["F", "E9", "B", "PLE", "PLW", "RUF012", "RUF100", "TC004", "TID251"]
 unfixable = ["B905"]
 
 [tool.mypy]
 python_version = "3.10"
 ignore_missing_imports = true
-warn_unused_ignores = true
+strict = true
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "datetime.date.fromisoformat".msg = "accepts different formats on Python 3.10 and 3.11+; use splitproof.isodate.calendar_day"
 "datetime.datetime.fromisoformat".msg = "accepts different formats on Python 3.10 and 3.11+; use splitproof.isodate.calendar_day"
 
 [tool.mutmut]
-paths_to_mutate = ["src/splitproof/"]
+source_paths = ["src/splitproof/"]
 do_not_mutate = [
   "src/splitproof/__init__.py",
   "src/splitproof/api.py",
@@ -99,5 +99,5 @@ do_not_mutate = [
   "src/splitproof/units.py",
   "src/splitproof/sim/*",
 ]
-tests_dir = ["tests/"]
+pytest_add_cli_args_test_selection = ["tests/"]
 also_copy = ["tools/", "examples/", "scripts/"]

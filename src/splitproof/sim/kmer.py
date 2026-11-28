@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any, ClassVar, Dict, Mapping, List, Optional, Sequence, Tuple
+from typing import ClassVar, Dict, Mapping, List, Optional, Sequence, Tuple
 
 import numpy as np
+from scipy.sparse import csr_matrix
 
 from . import (
     DEFAULT_MAX_PAIRS,
+    BackendParameter,
     EXACT,
     LOWER_BOUND,
     Neighbour,
@@ -48,9 +50,7 @@ def tokenise(value: str, k: int) -> List[str]:
     return [text[i : i + k] for i in range(len(text) - k + 1)]
 
 
-def _matrix(values: Sequence[Optional[str]], k: int):
-    from scipy.sparse import csr_matrix
-
+def _matrix(values: Sequence[Optional[str]], k: int) -> Tuple[csr_matrix, np.ndarray, List[int], int]:
     vocab: Dict[str, int] = {}
     indices: List[int] = []
     indptr: List[int] = [0]
@@ -90,7 +90,7 @@ class ExactJaccard(SimilarityBackend):
     name = "exact_jaccard"
     metric = "kmer_jaccard"
     exactness = EXACT
-    policy_params: ClassVar[Mapping[str, Tuple[type, Any, Any]]] = {"k": (int, 1, 64)}
+    policy_params: ClassVar[Mapping[str, BackendParameter]] = {"k": (int, 1, 64)}
 
     def __init__(self, k: Optional[int] = None):
         self.k = k
@@ -213,7 +213,7 @@ class MinHashJaccard(SimilarityBackend):
     name = "minhash"
     metric = "kmer_jaccard"
     exactness = LOWER_BOUND
-    policy_params: ClassVar[Mapping[str, Tuple[type, Any, Any]]] = {
+    policy_params: ClassVar[Mapping[str, BackendParameter]] = {
         "k": (int, 1, 64),
         "num_perm": (int, 16, 4096),
         "seed": (int, 0, 2**31 - 1),
@@ -247,7 +247,9 @@ class MinHashJaccard(SimilarityBackend):
                 best = (bands, rows)
         return best
 
-    def _signatures(self, values: Sequence[Optional[str]], k: int):
+    def _signatures(
+        self, values: Sequence[Optional[str]], k: int
+    ) -> Tuple[np.ndarray, List[Optional[frozenset[str]]], List[int]]:
         salt = self.seed.to_bytes(8, "little", signed=False)
         cache: Dict[str, int] = {}
 
@@ -262,7 +264,7 @@ class MinHashJaccard(SimilarityBackend):
         coeff_a = rng.integers(1, _MERSENNE, size=self.num_perm, dtype=np.uint64)
         coeff_b = rng.integers(0, _MERSENNE, size=self.num_perm, dtype=np.uint64)
         signatures = np.full((len(values), self.num_perm), np.iinfo(np.uint64).max, dtype=np.uint64)
-        token_sets: List[Optional[frozenset]] = []
+        token_sets: List[Optional[frozenset[str]]] = []
         missing: List[int] = []
         for i, value in enumerate(values):
             if value is None:
@@ -296,7 +298,7 @@ class MinHashJaccard(SimilarityBackend):
         k = self.size_for(kind)
         bands, rows = self._bands(threshold)
         signatures, token_sets, missing = self._signatures(values, k)
-        candidates: set = set()
+        candidates: set[Tuple[int, int]] = set()
         for band in range(bands):
             buckets: Dict[bytes, List[int]] = {}
             lo, hi = band * rows, (band + 1) * rows

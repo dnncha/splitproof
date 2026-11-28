@@ -5,7 +5,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import __version__, api, cert as cert_module, dataset as dataset_module, report as report_module
 from .errors import DataError, FileProblem, InfeasibleSplit, SplitproofError, Unexpected
@@ -31,11 +31,12 @@ GROUP_HINTS = ("donor", "patient", "subject", "cell_line", "cellline", "plate", 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if not getattr(args, "handler", None):
+    handler: Optional[Callable[[argparse.Namespace], int]] = getattr(args, "handler", None)
+    if handler is None:
         parser.print_help()
         return EXIT_ERROR
     try:
-        return args.handler(args)
+        return handler(args)
     except InfeasibleSplit as error:
         _emit_error(error, args)
         return EXIT_INFEASIBLE

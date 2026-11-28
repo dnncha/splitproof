@@ -18,6 +18,7 @@ class Dataset:
     ids: List[str]
     columns: Dict[str, List[Optional[str]]]
     path: Optional[Path] = None
+    id_column: Optional[str] = None
 
     def __len__(self) -> int:
         return len(self.ids)
@@ -119,7 +120,7 @@ def _from_records(records: Sequence[Dict[str, Any]], fieldnames: Sequence[str], 
             columns[name].append(_normalise(record.get(name)))
     if not ids:
         raise DataError("the dataset has no rows", remedy="Point splitproof at a file with data in it.")
-    return Dataset(ids=ids, columns=columns, path=path)
+    return Dataset(ids=ids, columns=columns, path=path, id_column=id_column)
 
 
 def load_delimited(path: Path, id_column: str, delimiter: str) -> Dataset:
@@ -134,7 +135,7 @@ def load_delimited(path: Path, id_column: str, delimiter: str) -> Dataset:
             details={"path": str(path)},
         )
     try:
-        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter, strict=True)
         if reader.fieldnames is None:
             raise DataError(f"{path} has no header row")
         fieldnames = [name.strip() for name in reader.fieldnames]
@@ -195,6 +196,7 @@ def load_parquet(path: Path, id_column: str) -> Dataset:
 
 
 def load_fasta(path: Path, id_column: str, sequence_column: str = "sequence") -> Dataset:
+    _refuse_repeated_columns([id_column, sequence_column], path)
     records: List[Dict[str, Any]] = []
     current_id: Optional[str] = None
     chunks: List[str] = []

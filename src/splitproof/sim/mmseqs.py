@@ -4,11 +4,12 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, ClassVar, Dict, Mapping, List, Optional, Sequence, Tuple
+from typing import ClassVar, Dict, Iterable, Mapping, List, Optional, Sequence, Tuple
 
 from ..errors import BackendUnavailable
 from . import (
     DEFAULT_MAX_PAIRS,
+    BackendParameter,
     HEURISTIC,
     Neighbour,
     PairSet,
@@ -26,20 +27,19 @@ EVALUE_DEFAULT = 0.001
 COV_MODE_DEFAULT = 0
 
 
-def _run(command, backend: str):
-    import subprocess as _subprocess
+def _run(command: Sequence[str], backend: str) -> subprocess.CompletedProcess[str]:
 
     from ..errors import SplitproofError
 
     try:
-        return _subprocess.run(command, capture_output=True, text=True, check=True)
+        return subprocess.run(command, capture_output=True, text=True, check=True)
     except FileNotFoundError as exc:
         raise BackendUnavailable(
             f"could not run {command[0]!r}",
             remedy="Install MMseqs2 and make sure 'mmseqs' is on PATH.",
             details={"backend": backend},
         ) from exc
-    except _subprocess.CalledProcessError as exc:
+    except subprocess.CalledProcessError as exc:
         tail = (exc.stderr or exc.stdout or "").strip().splitlines()
         raise SplitproofError(
             f"MMseqs2 exited with status {exc.returncode}",
@@ -55,7 +55,7 @@ def _run(command, backend: str):
         ) from exc
 
 
-def _collect(backend: str, threshold: float, max_pairs: int, triples) -> PairSet:
+def _collect(backend: str, threshold: float, max_pairs: int, triples: Iterable[Tuple[int, int, float]]) -> PairSet:
     collector = PairCollector(backend, threshold, max_pairs)
     for left, right, identity in triples:
         collector.add(left, right, identity)
@@ -103,7 +103,7 @@ class MMseqs2Identity(SimilarityBackend):
     name = "mmseqs2"
     metric = "identity"
     exactness = HEURISTIC
-    policy_params: ClassVar[Mapping[str, Tuple[type, Any, Any]]] = {
+    policy_params: ClassVar[Mapping[str, BackendParameter]] = {
         "coverage": (float, 0.0, 1.0),
         "sensitivity": (float, 1.0, 10.0),
         "evalue": (float, 0.0, 1e6),

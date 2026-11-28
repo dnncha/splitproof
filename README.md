@@ -24,6 +24,9 @@ To audit the random split column in that same file (exits `1` with crossing pair
 splitproof audit examples/proteins.yaml --split-column fold_random
 ```
 
+Assignment files have two columns for the entity ID and fold. For a header, use `id` or
+the dataset's ID column name, followed by `fold`, `split`, or `set`.
+
 On your own CSV, TSV, FASTA, or Parquet file, run `splitproof init data.csv` to draft a starter `policy.yaml`, review and edit the constraints, then run `splitproof split policy.yaml`. Install chemistry backends with `pip install '.[chem]'` (RDKit) and Parquet support with `pip install '.[parquet]'`.
 
 ## What splitproof found on public benchmarks
@@ -304,6 +307,9 @@ Not yet implemented in `0.1.0` (tracked in [NET.md](NET.md)):
 - Opt-in bridge-entity dropping (`--max-drop`) for breaking giant single-linkage components
 
 ## Status, citation, and license
+
+Crossing counts separate fold names with `|` and encode literal `%` and `|` in names as `%25`
+and `%7C`. Regenerate certificates that recorded crossing counts under the old ambiguous keys.
 
 v0.1.0 ([CHANGELOG.md](CHANGELOG.md)). Policy schema (`splitproof: 1`) and certificate schema (`schema: 1`) are versioned and may evolve before `1.0`.
 

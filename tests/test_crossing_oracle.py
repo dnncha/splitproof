@@ -7,7 +7,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from splitproof import evaluate
-from splitproof.assign import DROPPED, Assignment
+from splitproof.assign import DROPPED, Assignment, fold_order
 from splitproof.dataset import Dataset
 from splitproof.sim import PairSet
 
@@ -47,8 +47,7 @@ def test_class_crossings_match_brute_force_enumeration(case):
     kept = [i for i in range(len(ids)) if labels[i] is not None and folds[i] != DROPPED]
     pairs = [(i, j) for i, j in combinations(kept, 2) if labels[i] == labels[j]]
     total, crossing, by_pair = _brute(pairs, folds)
-    result = SimpleNamespace(groups=labels)
-    got_total, got_count, worst, examples, got_by_pair = evaluate._crossing_classes(result, data, assignment)
+    got_total, got_count, worst, examples, got_by_pair = evaluate._crossing_classes(labels, data, assignment)
     assert (got_total, got_count, got_by_pair) == (total, len(crossing), dict(sorted(by_pair.items())))
     assert worst == (1.0 if crossing else None)
     assert len(examples) <= evaluate.MAX_EXAMPLES
@@ -195,3 +194,17 @@ def test_audit_fold_check_refuses_exactly_the_ungradable_splits(folds, allow_dro
             assert error.details == {"missing": len(blank), "examples": blank[:10]}
         return
     assert not should_refuse, (folds, allow_dropped)
+
+
+def test_crossing_fold_pairs_have_distinct_keys_in_both_backends():
+    ids = ["a", "b", "c", "d", "e", "f", "g", "h"]
+    folds = ["a", "b|c", "a|b", "c", "fold2", "fold10", "a", "b%7Cc"]
+    data = Dataset(ids=ids, columns={"id": ids})
+    assignment = Assignment(fold_of=dict(enumerate(folds)), folds=sorted(set(folds), key=fold_order), stats=[])
+    labels = ["one", "one", "two", "two", "three", "three", "four", "four"]
+    result = SimpleNamespace(pairs=PairSet.from_triples([
+        (0, 1, 1.0), (2, 3, 1.0), (4, 5, 1.0), (6, 7, 1.0),
+    ]))
+    expected = {"a|b%7Cc": 1, "a%7Cb|c": 1, "a|b%257Cc": 1, "fold2|fold10": 1}
+    assert evaluate._crossing_classes(labels, data, assignment)[-1] == expected
+    assert evaluate._crossing(result, data, assignment)[-1] == expected

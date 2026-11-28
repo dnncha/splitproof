@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .evaluate import SATISFIED, SATISFIED_UNPROVEN, VIOLATED
 
@@ -30,12 +30,10 @@ def summary(certificate: Dict[str, Any]) -> str:
             f"Worst held-out similarity to the reference fold: {value} on {key} "
             f"({with_neighbour} of {queries} held-out items have any neighbour)."
         )
-    unconstrained = _unconstrained(certificate)
-    if unconstrained:
-        lines.append(
-            f"{unconstrained} entities had no usable value for a declared key, so no constraint "
-            "binds them. They are in a fold but unconstrained."
-        )
+    missing = _max_unusable_count(certificate)
+    if missing:
+        entities_without_values = "1 entity" if missing == 1 else f"{missing} entities"
+        lines.append(f"For at least one declared constraint, {entities_without_values} had no usable value.")
     if status != VIOLATED:
         lines.append(
             "That status covers only the constraints the policy declared. Read the numbers below "
@@ -66,7 +64,7 @@ def summary(certificate: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _unconstrained(certificate: Dict[str, Any]) -> int:
+def _max_unusable_count(certificate: Dict[str, Any]) -> int:
     total = 0
     for item in certificate.get("constraints", []):
         measured = item.get("measured") or {}
@@ -80,7 +78,7 @@ def _unconstrained(certificate: Dict[str, Any]) -> int:
     return total
 
 
-def _worst_neighbour(certificate: Dict[str, Any]):
+def _worst_neighbour(certificate: Dict[str, Any]) -> Optional[Tuple[str, float, Optional[int], Optional[int]]]:
     best = None
     for key, entry in (certificate.get("diagnostics", {}).get("keys") or {}).items():
         distribution = entry.get("nearest_reference_similarity") or {}

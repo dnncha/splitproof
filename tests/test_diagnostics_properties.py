@@ -60,3 +60,47 @@ def test_categorical_baseline_counts_exact_matches():
     neighbours = {0: SimpleNamespace(index=4), 1: SimpleNamespace(index=5), 2: SimpleNamespace(index=6), 3: SimpleNamespace(index=7)}
     result = _nn_baseline(neighbours, labels, "categorical", [0, 1, 2, 3])
     assert (result["compared"], result["metric"], result["value"]) == (3, "accuracy", round(2 / 3, 6))
+
+
+def test_cross_validation_only_builds_the_current_target_pool(monkeypatch):
+    import pytest
+
+    from splitproof import evaluate
+    from splitproof.assign import Assignment
+    from splitproof.dataset import Dataset
+    from splitproof.policy import Policy
+
+    class FirstProbeReached(Exception):
+        pass
+
+    visited = []
+
+    class ObservedGroup(list):
+        def __init__(self, name, indexes):
+            self.name = name
+            super().__init__(indexes)
+
+        def __iter__(self):
+            visited.append(self.name)
+            return super().__iter__()
+
+    class Backend:
+        name = "exact_duplicate"
+
+        def nearest(self, values, kind, queries, targets, order):
+            assert list(queries) == [0]
+            assert list(targets) == [1, 2]
+            assert visited == ["a", "b", "c", "b", "c", "a"]
+            raise FirstProbeReached
+
+    members = {name: ObservedGroup(name, [i]) for i, name in enumerate(("a", "b", "c"))}
+    monkeypatch.setattr(Assignment, "fold_members", lambda self: members)
+    monkeypatch.setattr(evaluate, "resolve", lambda *args, **kwargs: Backend())
+    policy = Policy.from_dict({
+        "dataset": {"id": "id", "similarity": {"text": {"column": "text", "kind": "text"}}},
+        "constraints": [{"kind": "similarity", "key": "text", "metric": "exact_duplicate"}],
+    })
+    data = Dataset(ids=["0", "1", "2"], columns={"text": ["x", "y", "z"]})
+    assignment = Assignment(fold_of={0: "a", 1: "b", 2: "c"}, folds=list(members), stats=[])
+    with pytest.raises(FirstProbeReached):
+        evaluate.diagnostics(policy, data, assignment)

@@ -9,6 +9,7 @@ from . import __version__, api, cert as cert_module, dataset as dataset_module
 from . import report as report_module
 from . import units as units_module
 from .errors import ArgumentsInvalid, SplitproofError
+from .json_input import load_json
 from .policy import Policy
 
 FALLBACK_PROTOCOL = "2025-06-18"
@@ -191,7 +192,7 @@ def _summarise(certificate: Dict[str, Any], extra: Optional[Dict[str, Any]] = No
     return payload
 
 
-def _required(arguments: Dict[str, Any], name: str) -> Any:
+def _required(arguments: Dict[str, Any], name: str) -> str:
     value = arguments.get(name)
     if value is None or value == "":
         raise ArgumentsInvalid(f"argument '{name}' is required", details={"argument": name})
@@ -425,8 +426,8 @@ def serve(stdin: Optional[TextIO] = None, stdout: Optional[TextIO] = None) -> in
         if not line:
             continue
         try:
-            message = json.loads(line)
-        except json.JSONDecodeError:
+            message = load_json(line)
+        except (ValueError, RecursionError):
             sink.write(
                 json.dumps({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}) + "\n"
             )

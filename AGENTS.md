@@ -1,7 +1,9 @@
 # Working on splitproof
 
-Inner loop: `.venv/bin/python -m pytest -q -m "not binary"`
-Gate, before any commit: `./scripts/gate.sh`
+Inner loop: `./scripts/gate.sh --inner`
+Static checks: `./scripts/gate.sh --static`
+Gate, before any commit: `./scripts/gate.sh` with MMseqs2 on PATH.
+The gate bootstraps the dev, chem and parquet extras on a clean checkout.
 
 [NET.md](NET.md) holds the feedback net: every signal and its trigger, the risk surfaces
 and their coverage, the ranked holes, and the escape log. Read it before adding a check,

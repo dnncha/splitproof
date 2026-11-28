@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import functools
-from typing import Any, ClassVar, Dict, Mapping, List, Optional, Sequence, Tuple
+from types import ModuleType
+from typing import TYPE_CHECKING, Callable, ClassVar, cast, Dict, Mapping, List, Optional, Sequence, Tuple
 
-from ..errors import BackendFailed
+from ..errors import BackendFailed, BackendUnavailable
 from . import (
     DEFAULT_MAX_PAIRS,
+    BackendParameter,
     EXACT,
     Neighbour,
     SimilarityBackend,
@@ -13,6 +15,12 @@ from . import (
     PairCollector,
     register,
 )
+
+if TYPE_CHECKING:
+    from rdkit.Chem import Mol
+    from rdkit.Chem.MolStandardize.rdMolStandardize import LargestFragmentChooser, Uncharger
+    from rdkit.Chem.SaltRemover import SaltRemover as SaltStripper
+    from rdkit.DataStructs import ExplicitBitVect
 
 RADIUS_DEFAULT = 2
 BITS_DEFAULT = 2048
@@ -24,18 +32,19 @@ _HINT = (
 
 
 @functools.lru_cache(maxsize=1)
-def _standardisers():
+def _standardisers() -> Tuple[SaltStripper, LargestFragmentChooser, Uncharger]:
     from rdkit.Chem import SaltRemover
     from rdkit.Chem.MolStandardize import rdMolStandardize
 
+    new_remover = cast("Callable[[], SaltStripper]", SaltRemover.SaltRemover)
     return (
-        SaltRemover.SaltRemover(),
+        new_remover(),
         rdMolStandardize.LargestFragmentChooser(),
         rdMolStandardize.Uncharger(),
     )
 
 
-def standardise(chemistry, molecule):
+def standardise(chemistry: ModuleType, molecule: Mol) -> Mol:
     """One molecule, comparable across salt form, charge state and fragment order.
 
     Counterions in RDKit's salt dictionary are stripped first, which handles the
@@ -55,7 +64,8 @@ def standardise(chemistry, molecule):
     if not any(atom.GetAtomicNum() == 6 for atom in molecule.GetAtoms()):
         return molecule
     remover, largest, uncharger = _standardisers()
-    stripped = remover.StripMol(molecule, dontRemoveEverything=True)
+    strip_salts = cast("Callable[[Mol, bool], Optional[Mol]]", remover.StripMol)
+    stripped = strip_salts(molecule, True)
     if stripped is not None and stripped.GetNumHeavyAtoms():
         molecule = stripped
     if len(chemistry.GetMolFrags(molecule)) > 1:
@@ -66,17 +76,17 @@ def standardise(chemistry, molecule):
         return molecule
 
 
-def _rdkit():
+def _rdkit() -> Tuple[ModuleType, ModuleType]:
     try:
-        from rdkit import Chem, RDLogger
+        from rdkit import Chem, rdBase
         from rdkit.Chem import rdFingerprintGenerator
-    except ModuleNotFoundError:
-        return None
-    RDLogger.DisableLog("rdApp.*")
+    except ModuleNotFoundError as exc:
+        raise BackendUnavailable("RDKit is required for molecule similarity", remedy=_HINT) from exc
+    rdBase.DisableLog("rdApp.*")
     return Chem, rdFingerprintGenerator
 
 
-def ring_systems(chemistry, molecule) -> Optional[str]:
+def ring_systems(chemistry: ModuleType, molecule: Mol) -> Optional[str]:
     """A canonical key for the molecule's ring skeleton, or None if it has no rings.
 
     Salts and solvates are reduced to the largest covalent fragment. Fused rings are
@@ -102,7 +112,7 @@ def ring_systems(chemistry, molecule) -> Optional[str]:
     info = molecule.GetRingInfo()
     if info.NumRings() == 0:
         return None
-    systems: List[set] = []
+    systems: List[set[int]] = []
     for ring in info.AtomRings():
         current = set(ring)
         overlapping = [existing for existing in systems if existing & current]
@@ -130,7 +140,11 @@ def ring_systems(chemistry, molecule) -> Optional[str]:
 
 class _ChemBackend(SimilarityBackend):
     def available(self) -> bool:
-        return _rdkit() is not None
+        try:
+            _rdkit()
+        except BackendUnavailable:
+            return False
+        return True
 
     def install_hint(self) -> str:
         return _HINT
@@ -149,27 +163,28 @@ class MorganTanimoto(_ChemBackend):
     name = "tanimoto"
     metric = "tanimoto"
     exactness = EXACT
-    policy_params: ClassVar[Mapping[str, Tuple[type, Any, Any]]] = {"radius": (int, 0, 8), "bits": (int, 32, 65536)}
+    policy_params: ClassVar[Mapping[str, BackendParameter]] = {"radius": (int, 0, 8), "bits": (int, 32, 65536)}
 
     def __init__(self, radius: int = RADIUS_DEFAULT, bits: int = BITS_DEFAULT):
         self.radius = radius
         self.bits = bits
 
-    def _fingerprints(self, values: Sequence[Optional[str]]):
+    def _fingerprints(
+        self, values: Sequence[Optional[str]]
+    ) -> Tuple[Dict[int, ExplicitBitVect], List[int], List[int]]:
         Chem, generators = _rdkit()
         generator = generators.GetMorganGenerator(radius=self.radius, fpSize=self.bits)
-        prints: List[Optional[object]] = []
+        prints: Dict[int, ExplicitBitVect] = {}
         missing: List[int] = []
         unparsable: List[int] = []
         for i, value in enumerate(values):
             molecule = Chem.MolFromSmiles(value) if value else None
             if molecule is None:
-                prints.append(None)
                 missing.append(i)
                 if value:
                     unparsable.append(i)
                 continue
-            prints.append(generator.GetFingerprint(standardise(Chem, molecule)))
+            prints[i] = generator.GetFingerprint(standardise(Chem, molecule))
         return prints, missing, unparsable
 
     def pairs_above(
@@ -184,7 +199,7 @@ class MorganTanimoto(_ChemBackend):
 
         prints, missing, unparsable = self._fingerprints(values)
         collector = PairCollector(self.name, threshold, max_pairs)
-        present = [i for i, fingerprint in enumerate(prints) if fingerprint is not None]
+        present = list(prints)
         for position, i in enumerate(present):
             tail = present[position + 1 :]
             if not tail:
@@ -228,13 +243,13 @@ class MorganTanimoto(_ChemBackend):
         prints, _missing, _unparsable = self._fingerprints(values)
         key = (lambda index: str(order[index])) if order is not None else (lambda index: index)
         target_list = [
-            i for i in sorted(set(int(t) for t in targets), key=key) if prints[i] is not None
+            i for i in sorted(set(int(t) for t in targets), key=key) if i in prints
         ]
         out: Dict[int, Optional[Neighbour]] = {}
         for raw in queries:
             query = int(raw)
             out[query] = None
-            if prints[query] is None:
+            if query not in prints:
                 continue
             pool = [i for i in target_list if i != query]
             if not pool:
@@ -252,7 +267,9 @@ class CanonicalSmiles(_ChemBackend):
     exactness = EXACT
     emits = "classes"
 
-    def _canonical(self, values: Sequence[Optional[str]]):
+    def _canonical(
+        self, values: Sequence[Optional[str]]
+    ) -> Tuple[List[Optional[str]], List[int], List[int]]:
         Chem, _generators = _rdkit()
         out: List[Optional[str]] = []
         missing: List[int] = []
@@ -312,12 +329,14 @@ class CanonicalSmiles(_ChemBackend):
         key = (lambda index: str(order[index])) if order is not None else (lambda index: index)
         lookup: Dict[str, int] = {}
         for i in sorted(set(int(t) for t in targets), key=key):
-            if canonical[i]:
-                lookup.setdefault(canonical[i], i)
+            label = canonical[i]
+            if label:
+                lookup.setdefault(label, i)
         out: Dict[int, Optional[Neighbour]] = {}
         for raw in queries:
             query = int(raw)
-            match = lookup.get(canonical[query]) if canonical[query] else None
+            label = canonical[query]
+            match = lookup.get(label) if label else None
             out[query] = Neighbour(index=match, similarity=1.0) if match is not None and match != query else None
         return out
 

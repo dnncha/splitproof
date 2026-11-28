@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Dict, Mapping, Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Callable, TypeVar, ClassVar, Dict, Mapping, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 import math
 
@@ -14,6 +14,9 @@ HEURISTIC = "heuristic"
 LOWER_BOUND = "lower_bound"
 
 EXACTNESS_RANK = {EXACT: 2, HEURISTIC: 1, LOWER_BOUND: 0}
+
+SettingValue = int | float | str
+BackendParameter = Tuple[type[int] | type[float], int | float | None, int | float | None]
 
 DEFAULT_MAX_PAIRS = 20_000_000
 
@@ -250,7 +253,7 @@ class SimilarityBackend:
     metric = "abstract"
     exactness = LOWER_BOUND
     emits = "pairs"
-    policy_params: ClassVar[Mapping[str, Tuple[type, Any, Any]]] = {}
+    policy_params: ClassVar[Mapping[str, BackendParameter]] = {}
 
     def version(self) -> str:
         raise NotImplementedError
@@ -295,24 +298,25 @@ def tie_ranks(order: Optional[Sequence[str]], size: int) -> "np.ndarray":
     return np.argsort(np.argsort(np.asarray(keys))).astype(np.int64)
 
 
-BACKENDS: Dict[str, type] = {}
+BackendT = TypeVar("BackendT", bound=SimilarityBackend)
+BACKENDS: Dict[str, type[SimilarityBackend]] = {}
 
 
-def register(name: str):
-    def decorate(cls):
+def register(name: str) -> Callable[[type[BackendT]], type[BackendT]]:
+    def decorate(cls: type[BackendT]) -> type[BackendT]:
         BACKENDS[name] = cls
         return cls
 
     return decorate
 
 
-def backend_table() -> Dict[str, type]:
+def backend_table() -> Dict[str, type[SimilarityBackend]]:
     from . import chem, duplicate, kmer, mmseqs  # noqa: F401
 
     return dict(BACKENDS)
 
 
-def construct(cls, settings: Dict[str, Any]):
+def construct(cls: type[SimilarityBackend], settings: Mapping[str, SettingValue]) -> SimilarityBackend:
     """Build a backend from policy params, which are untrusted input.
 
     A certificate carries its own policy and `verify` instantiates backends from it,
@@ -320,8 +324,8 @@ def construct(cls, settings: Dict[str, Any]):
     the names a backend lists in policy_params are accepted, and each is range
     checked. Executable paths are deliberately not among them.
     """
-    allowed = dict(getattr(cls, "policy_params", {}) or {})
-    name = getattr(cls, "name", cls.__name__)
+    allowed = cls.policy_params
+    name = cls.name
     unknown = sorted(set(settings) - set(allowed))
     if unknown:
         raise BackendUnavailable(
@@ -333,7 +337,7 @@ def construct(cls, settings: Dict[str, Any]):
             ),
             details={"backend": name, "given": sorted(settings), "accepted": sorted(allowed)},
         )
-    checked: Dict[str, Any] = {}
+    checked: Dict[str, int | float] = {}
     for key, value in settings.items():
         kind, low, high = allowed[key]
         if isinstance(value, bool):
@@ -341,7 +345,7 @@ def construct(cls, settings: Dict[str, Any]):
                 f"{name}.{key} must be a number, got a boolean",
                 details={"backend": name, "param": key},
             )
-        if kind is int and isinstance(value, float) and value != int(value):
+        if kind is int and isinstance(value, float) and not value.is_integer():
             raise BackendUnavailable(
                 f"{name}.{key} must be a whole number, got {value!r}",
                 details={"backend": name, "param": key, "value": str(value)},
@@ -374,8 +378,8 @@ def resolve(
     *,
     requested: Optional[str] = None,
     exact_max_n: int = 20000,
-    settings: Optional[Dict[str, Any]] = None,
-):
+    settings: Optional[Mapping[str, SettingValue]] = None,
+) -> SimilarityBackend:
     table = backend_table()
     settings = settings or {}
     if requested:
