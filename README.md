@@ -24,6 +24,9 @@ To audit the random split column in that same file (exits `1` with crossing pair
 splitproof audit examples/proteins.yaml --split-column fold_random
 ```
 
+Assignment files have two columns for the entity ID and fold. For a header, use `id` or
+the dataset's ID column name, followed by `fold`, `split`, or `set`.
+
 On your own CSV, TSV, FASTA, or Parquet file, run `splitproof init data.csv` to draft a starter `policy.yaml`, review and edit the constraints, then run `splitproof split policy.yaml`. Install chemistry backends with `pip install '.[chem]'` (RDKit) and Parquet support with `pip install '.[parquet]'`.
 
 ## What splitproof found on public benchmarks

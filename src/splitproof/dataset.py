@@ -18,6 +18,7 @@ class Dataset:
     ids: List[str]
     columns: Dict[str, List[Optional[str]]]
     path: Optional[Path] = None
+    id_column: Optional[str] = None
 
     def __len__(self) -> int:
         return len(self.ids)
@@ -119,7 +120,7 @@ def _from_records(records: Sequence[Dict[str, Any]], fieldnames: Sequence[str], 
             columns[name].append(_normalise(record.get(name)))
     if not ids:
         raise DataError("the dataset has no rows", remedy="Point splitproof at a file with data in it.")
-    return Dataset(ids=ids, columns=columns, path=path)
+    return Dataset(ids=ids, columns=columns, path=path, id_column=id_column)
 
 
 def load_delimited(path: Path, id_column: str, delimiter: str) -> Dataset:

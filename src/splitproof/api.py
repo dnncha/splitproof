@@ -216,6 +216,7 @@ def _from_split_file(data: Dataset, path: Path, *, allow_dropped: bool = False) 
     first_id = rows[0][0].strip()
     header = (
         len(rows[0]) == 2
+        and (first_id == data.id_column or first_id.lower() == "id")
         and rows[0][1].strip().lower() in {"fold", "split", "set"}
         and (first_id not in known or any(row[0].strip() == first_id for row in rows[1:]))
     )

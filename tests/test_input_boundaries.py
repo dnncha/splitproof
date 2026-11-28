@@ -188,3 +188,13 @@ def test_yaml_reuses_an_anchor_with_nested_merges(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert Policy.load(path).dataset.id_column == "chosen"
+
+
+@pytest.mark.parametrize("first_row", ["unknown,fold", "a,fold"])
+def test_split_does_not_treat_an_assignment_as_a_generated_header(tmp_path: Path, first_row: str) -> None:
+    path = tmp_path / "data.csv"
+    path.write_text("accession\na\nb\n", encoding="utf-8")
+    split = tmp_path / "split.csv"
+    split.write_text(f"{first_row}\na,test\nb,train\n", encoding="utf-8")
+    with pytest.raises(DataError):
+        api.load_assignment(load(path, "accession"), split_path=split)
