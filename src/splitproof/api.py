@@ -204,15 +204,24 @@ def _from_split_file(data: Dataset, path: Path, *, allow_dropped: bool = False) 
         raise DataError(f"split file not found: {path}", details={"path": str(path)})
     delimiter = "\t" if path.suffix.lower() in {".tsv", ".tab"} else ","
     mapping: Dict[str, str] = {}
-    with path.open("r", encoding="utf-8-sig", newline="") as handle:
-        reader = csv.reader(handle, delimiter=delimiter)
-        rows = [row for row in reader if row and any(cell.strip() for cell in row)]
+    try:
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            reader = csv.reader(handle, delimiter=delimiter, strict=True)
+            rows = [row for row in reader if row and any(cell.strip() for cell in row)]
+    except (csv.Error, UnicodeDecodeError) as exc:
+        raise DataError(f"{path} is not readable as delimited text: {exc}") from exc
     if not rows:
         raise DataError(f"split file {path} is empty")
-    header = len(rows[0]) > 1 and rows[0][1].strip().lower() in {"fold", "split", "set"}
+    known = set(data.ids)
+    first_id = rows[0][0].strip()
+    header = (
+        len(rows[0]) == 2
+        and rows[0][1].strip().lower() in {"fold", "split", "set"}
+        and (first_id not in known or any(row[0].strip() == first_id for row in rows[1:]))
+    )
     duplicates: List[str] = []
     for row in rows[1 if header else 0 :]:
-        if len(row) < 2:
+        if len(row) != 2:
             raise DataError(
                 f"split file {path} needs two columns: id,fold",
                 details={"path": str(path), "row": row},
@@ -230,7 +239,6 @@ def _from_split_file(data: Dataset, path: Path, *, allow_dropped: bool = False) 
             ),
             details={"examples": sorted(set(duplicates))[:10]},
         )
-    known = set(data.ids)
     unknown = sorted(set(mapping) - known)
     if unknown:
         raise DataError(

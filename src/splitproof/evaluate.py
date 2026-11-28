@@ -5,9 +5,9 @@ import math
 import numpy as np
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
-from .assign import DROPPED, Assignment
+from .assign import DROPPED, Assignment, fold_order
 from .dataset import Dataset
 from .errors import VacuousConstraint
 from .policy import DisjointConstraint, Policy, SimilarityConstraint, TemporalConstraint
@@ -171,6 +171,13 @@ def _check_similarity(
     )
 
 
+def _fold_pair_key(left: str, right: str) -> str:
+    return "|".join(
+        name.replace("%", "%25").replace("|", "%7C")
+        for name in sorted((left, right), key=fold_order)
+    )
+
+
 def _crossing_classes(
     groups: Sequence[Optional[str]],
     data: Dataset,
@@ -208,7 +215,7 @@ def _crossing_classes(
             for second in range(first + 1, len(names)):
                 left, right = names[first], names[second]
                 amount = folds[left] * folds[right]
-                key = "|".join(sorted((left, right)))
+                key = _fold_pair_key(left, right)
                 by_pair[key] = by_pair.get(key, 0) + amount
                 first_member, second_member = sorted(
                     (witness[label][left], witness[label][right]), key=lambda i: data.ids[i]
@@ -266,7 +273,7 @@ def _crossing(
     encoded = np.minimum(pair_left, pair_right) * len(names) + np.maximum(pair_left, pair_right)
     codes, amounts = np.unique(encoded, return_counts=True)
     by_pair: Dict[str, int] = {
-        f"{names[int(code) // len(names)]}|{names[int(code) % len(names)]}": int(amount)
+        _fold_pair_key(names[int(code) // len(names)], names[int(code) % len(names)]): int(amount)
         for code, amount in zip(codes, amounts, strict=True)
     }
     return count, worst, examples, dict(sorted(by_pair.items()))
@@ -389,6 +396,15 @@ def reference_fold(assignment: Assignment) -> Optional[str]:
 
 
 
+def _cross_validation_probes(
+    members: dict[str, list[int]], probe_folds: Sequence[str]
+) -> Iterator[tuple[list[int], list[int]]]:
+    for fold in probe_folds:
+        yield members[fold], [
+            index for name, group in members.items() if name != fold for index in group
+        ]
+
+
 def diagnostics(
     policy: Policy,
     data: Dataset,
@@ -407,19 +423,11 @@ def diagnostics(
     }
     if skip_neighbours or not policy.similarity_constraints or not members:
         return out
-    if held_out_against_rest:
-        probes = [
-            (group, [i for name, other in members.items() if name != fold for i in other])
-            for fold, group in sorted(members.items())
-        ]
-    else:
-        targets = members.get(anchor, []) if anchor is not None else []
-        queries = [index for fold, group in members.items() if fold != anchor for index in group]
-        probes = [(queries, targets)]
-    probes = [(q, t) for q, t in probes if q and t]
-    if not probes:
+    members = {fold: group for fold, group in members.items() if group}
+    if len(members) < 2 or (anchor is not None and anchor not in members):
         return out
-    queries = [index for group, _ in probes for index in group]
+    probe_folds = sorted(members) if held_out_against_rest else list(members)
+    queries = [index for fold in probe_folds if fold != anchor for index in members[fold]]
     label_values = data.column(policy.dataset.label_column) if policy.dataset.label_column else None
     kind = units_label_kind(policy, label_values) if label_values is not None else None
     for constraint in policy.similarity_constraints:
@@ -434,6 +442,11 @@ def diagnostics(
         )
         neighbours: Dict[int, Optional[Neighbour]] = {}
         column = data.column(key.column)
+        probes = (
+            _cross_validation_probes(members, probe_folds)
+            if anchor is None
+            else iter([(queries, members[anchor])])
+        )
         for probe_queries, probe_targets in probes:
             neighbours.update(
                 backend.nearest(column, key.kind, probe_queries, probe_targets, data.ids)

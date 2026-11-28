@@ -7,7 +7,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from splitproof import evaluate
-from splitproof.assign import DROPPED, Assignment
+from splitproof.assign import DROPPED, Assignment, fold_order
 from splitproof.dataset import Dataset
 from splitproof.sim import PairSet
 
@@ -194,3 +194,15 @@ def test_audit_fold_check_refuses_exactly_the_ungradable_splits(folds, allow_dro
             assert error.details == {"missing": len(blank), "examples": blank[:10]}
         return
     assert not should_refuse, (folds, allow_dropped)
+
+
+def test_crossing_fold_pairs_have_distinct_keys_in_both_backends():
+    ids = ["a", "b", "c", "d", "e", "f"]
+    folds = ["a", "b|c", "a|b", "c", "fold2", "fold10"]
+    data = Dataset(ids=ids, columns={"id": ids})
+    assignment = Assignment(fold_of=dict(enumerate(folds)), folds=sorted(folds, key=fold_order), stats=[])
+    labels = ["one", "one", "two", "two", "three", "three"]
+    result = SimpleNamespace(pairs=PairSet.from_triples([(0, 1, 1.0), (2, 3, 1.0), (4, 5, 1.0)]))
+    expected = {"a|b%7Cc": 1, "a%7Cb|c": 1, "fold2|fold10": 1}
+    assert evaluate._crossing_classes(labels, data, assignment)[-1] == expected
+    assert evaluate._crossing(result, data, assignment)[-1] == expected

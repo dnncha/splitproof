@@ -134,7 +134,7 @@ def load_delimited(path: Path, id_column: str, delimiter: str) -> Dataset:
             details={"path": str(path)},
         )
     try:
-        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter, strict=True)
         if reader.fieldnames is None:
             raise DataError(f"{path} has no header row")
         fieldnames = [name.strip() for name in reader.fieldnames]
@@ -195,6 +195,7 @@ def load_parquet(path: Path, id_column: str) -> Dataset:
 
 
 def load_fasta(path: Path, id_column: str, sequence_column: str = "sequence") -> Dataset:
+    _refuse_repeated_columns([id_column, sequence_column], path)
     records: List[Dict[str, Any]] = []
     current_id: Optional[str] = None
     chunks: List[str] = []

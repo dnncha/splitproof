@@ -10,6 +10,7 @@ from .sim import SettingValue
 
 from .digest import canonical
 from .isodate import calendar_day
+from .json_input import load_json
 from .errors import PolicyError
 
 POLICY_VERSION = 1
@@ -101,13 +102,26 @@ def _as_text(value: Any, where: str) -> str:
     return text
 
 
-def _as_mapping(value: Any, where: str) -> Dict[str, Any]:
+def _as_mapping(value: object, where: str) -> dict[Any, Any]:
     if not isinstance(value, dict):
         raise PolicyError(
             f"{where} must be a mapping, got {type(value).__name__}",
             details={"where": where, "value": str(value)},
         )
     return value
+
+
+def _named_mapping(mapping: dict[object, object], where: str) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in mapping.items():
+        name = _as_text(key, where)
+        if name in result:
+            raise PolicyError(
+                f"duplicate name {name!r} in {where} after normalisation",
+                details={"where": where, "name": name},
+            )
+        result[name] = value
+    return result
 
 
 def _as_list(value: Any, where: str) -> List[Any]:
@@ -291,20 +305,12 @@ class Scheme:
                 details={"where": f"{where}.fractions"},
             )
         fractions: Dict[str, float] = {}
-        for raw_name, raw_value in fractions_raw.items():
-            name = _as_text(raw_name, f"{where}.fractions")
+        for name, raw_value in _named_mapping(fractions_raw, f"{where}.fractions").items():
             if name.startswith(RESERVED_FOLD_PREFIX):
                 raise PolicyError(
                     f"fold name {name!r} is reserved: names starting with "
                     f"{RESERVED_FOLD_PREFIX!r} mark rows splitproof dropped or left unassigned",
                     remedy="Rename the fold.",
-                    details={"where": f"{where}.fractions", "value": name},
-                )
-            if name in fractions:
-                raise PolicyError(
-                    f"fold name {name!r} appears twice in scheme.fractions once surrounding "
-                    "whitespace is removed",
-                    remedy="Give every fold a distinct name.",
                     details={"where": f"{where}.fractions", "value": name},
                 )
             fractions[name] = _as_float(raw_value, f"{where}.fractions.{name}")
@@ -380,11 +386,14 @@ class DatasetSpec:
             id_column=_as_text(_require(raw, "id", where), f"{where}.id"),
             label_column=_as_text(raw["label"], f"{where}.label") if raw.get("label") else None,
             label_kind=label_kind,
-            similarity={name: SimilarityKey.parse(name, value) for name, value in similarity_raw.items()},
+            similarity={
+                name: SimilarityKey.parse(name, value)
+                for name, value in _named_mapping(similarity_raw, f"{where}.similarity").items()
+            },
             groups=[_as_text(g, f"{where}.groups") for g in groups_raw],
             dates={
-                _as_text(k, f"{where}.dates"): _as_text(v, f"{where}.dates.{k}")
-                for k, v in dates_raw.items()
+                name: _as_text(value, f"{where}.dates.{name}")
+                for name, value in _named_mapping(dates_raw, f"{where}.dates").items()
             },
         )
 
@@ -454,7 +463,7 @@ class Policy:
     def load(path: Path) -> "Policy":
         try:
             text = Path(path).read_text(encoding="utf-8")
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             raise PolicyError(
                 f"could not read the policy at {path}",
                 remedy="Check the path. 'splitproof init <data>' writes a starter policy.",
@@ -466,14 +475,11 @@ class Policy:
 def _parse_structured(text: str, path: Path) -> object:
     suffix = Path(path).suffix.lower()
     if suffix == ".json":
-        import json
-
         try:
-            loaded: object = json.loads(text)
-            return loaded
-        except json.JSONDecodeError as exc:
+            return load_json(text)
+        except (ValueError, RecursionError) as exc:
             raise PolicyError(
-                f"policy file {path} is not valid JSON",
+                f"policy file {path} is not valid JSON: {exc}",
                 remedy="Fix the syntax. The error below names the position.",
                 details={"path": str(path), "reason": str(exc)},
             ) from exc
@@ -484,11 +490,48 @@ def _parse_structured(text: str, path: Path) -> object:
             "reading a YAML policy needs PyYAML",
             remedy="Install splitproof normally (pip install splitproof) or use a .json policy.",
         ) from exc
+    from yaml.constructor import ConstructorError
+    from yaml.nodes import MappingNode
+
+    class UniqueKeysLoader(yaml.SafeLoader):
+        def __init__(self, stream: str) -> None:
+            super().__init__(stream)
+            self.flattened: set[MappingNode] = set()
+
+        def flatten_mapping(self, node: MappingNode) -> None:
+            if node in self.flattened:
+                return
+            seen: set[object] = set()
+            merge_seen = False
+            for key_node, _ in node.value:
+                if key_node.tag == "tag:yaml.org,2002:merge":
+                    repeated = merge_seen
+                    merge_seen = True
+                    key: object = "<<"
+                else:
+                    key = (
+                        "=" if key_node.tag == "tag:yaml.org,2002:value"
+                        else self.construct_object(key_node)
+                    )
+                    try:
+                        repeated = key in seen
+                        seen.add(key)
+                    except TypeError as exc:
+                        raise ConstructorError(
+                            None, None, "unhashable mapping key", key_node.start_mark
+                        ) from exc
+                if repeated:
+                    raise ConstructorError(
+                        None, None, f"duplicate YAML key {key!r}", key_node.start_mark
+                    )
+            super().flatten_mapping(node)
+            self.flattened.add(node)
+
     try:
-        loaded = yaml.safe_load(text)
-    except yaml.YAMLError as exc:
+        loaded: object = yaml.load(text, Loader=UniqueKeysLoader)
+    except (yaml.YAMLError, ValueError, RecursionError) as exc:
         raise PolicyError(
-            f"policy file {path} is not valid YAML",
+            f"policy file {path} is not valid YAML: {exc}",
             remedy="Fix the syntax. The error below names the line.",
             details={"path": str(path), "reason": str(exc)},
         ) from exc
@@ -607,8 +650,7 @@ def _parse_similarity(item: Dict[str, Any], where: str, dataset: DatasetSpec) ->
     backend = _as_text(item["backend"], f"{where}.backend") if item.get("backend") else None
     params_raw = _as_mapping(item.get("params") or {}, f"{where}.params")
     params: Dict[str, SettingValue] = {}
-    for name, value in params_raw.items():
-        label = _as_text(name, f"{where}.params")
+    for label, value in _named_mapping(params_raw, f"{where}.params").items():
         if isinstance(value, bool) or not isinstance(value, (int, float, str)):
             raise PolicyError(
                 f"{where}.params.{label} must be a number or a name, got {type(value).__name__}",

@@ -502,6 +502,11 @@ def _best_fold(
 
 
 def _leave_unit_out(graph: UnitGraph) -> Assignment:
+    if len(graph.units) < 2:
+        raise InfeasibleSplit(
+            "leave-unit-out needs at least two independent units",
+            details={"units": len(graph.units)},
+        )
     if len(graph.units) > MAX_FOLDS:
         raise InfeasibleSplit(
             f"leave-unit-out would make {len(graph.units)} folds, above the {MAX_FOLDS} cap",

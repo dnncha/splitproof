@@ -13,6 +13,7 @@ from .dataset import Dataset
 from .digest import digest
 from .errors import CertificateMismatch
 from .evaluate import SATISFIED, SATISFIED_UNPROVEN, VIOLATED, ConstraintReport
+from .json_input import load_json
 from .policy import Policy
 from .units import UnitGraph
 
@@ -90,10 +91,10 @@ def write(path: Path, certificate: Dict[str, Any]) -> None:
 
 def read(path: Path) -> Dict[str, Any]:
     try:
-        loaded = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        loaded = load_json(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError) as exc:
         raise CertificateMismatch(
-            f"could not read certificate {path}",
+            f"could not read certificate {path}: {exc}",
             remedy="Pass the splitproof.cert.json produced by 'splitproof split'.",
             details={"path": str(path)},
         ) from exc

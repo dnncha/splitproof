@@ -305,6 +305,9 @@ Not yet implemented in `0.1.0` (tracked in [NET.md](NET.md)):
 
 ## Status, citation, and license
 
+Crossing counts separate fold names with `|` and encode literal `%` and `|` in names as `%25`
+and `%7C`. Regenerate certificates that recorded crossing counts under the old ambiguous keys.
+
 v0.1.0 ([CHANGELOG.md](CHANGELOG.md)). Policy schema (`splitproof: 1`) and certificate schema (`schema: 1`) are versioned and may evolve before `1.0`.
 
 - Citation metadata: [CITATION.cff](CITATION.cff)
