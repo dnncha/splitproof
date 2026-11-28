@@ -37,9 +37,11 @@ def _probe(hash_seed: str) -> dict:
         [sys.executable, "-c", PROBE.format(tests=str(Path(__file__).parent))],
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
         env=environment,
     )
+    if completed.returncode:
+        pytest.fail(f"MinHash subprocess failed for PYTHONHASHSEED={hash_seed}: {completed.stderr}")
     return json.loads(completed.stdout.strip().splitlines()[-1])
 
 

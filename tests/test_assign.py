@@ -109,3 +109,11 @@ def test_a_partially_missing_key_is_still_allowed(policy_dict, tmp_path: Path):
     assert outcome.ok
     similarity = next(iter(outcome.certificate["units"]["similarity"].values()))
     assert similarity["missing_values"] == 1
+
+
+@pytest.mark.parametrize("names", [("fold", "fold2", "fold10"), ("set", "set١", "set²")])
+def test_holdout_accepts_fold_names_with_a_common_prefix(names):
+    from splitproof.policy import Scheme
+
+    scheme = Scheme.parse({"fractions": dict.fromkeys(reversed(names), 1)})
+    assert scheme.fold_names == list(names)

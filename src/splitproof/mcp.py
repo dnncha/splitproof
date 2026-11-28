@@ -191,7 +191,7 @@ def _summarise(certificate: Dict[str, Any], extra: Optional[Dict[str, Any]] = No
     return payload
 
 
-def _required(arguments: Dict[str, Any], name: str) -> Any:
+def _required(arguments: Dict[str, Any], name: str) -> str:
     value = arguments.get(name)
     if value is None or value == "":
         raise ArgumentsInvalid(f"argument '{name}' is required", details={"argument": name})

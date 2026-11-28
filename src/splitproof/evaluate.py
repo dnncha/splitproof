@@ -11,7 +11,7 @@ from .assign import DROPPED, Assignment
 from .dataset import Dataset
 from .errors import VacuousConstraint
 from .policy import DisjointConstraint, Policy, SimilarityConstraint, TemporalConstraint
-from .sim import EXACT, resolve
+from .sim import EXACT, Neighbour, SimilarityResult, resolve
 from .units import UnitGraph, _constraint_id
 from .units import label_kind as units_label_kind
 
@@ -108,7 +108,7 @@ def _check_similarity(
     result = graph.similarity.get(identifier)
     fold_of = assignment.fold_of
     if result is not None and result.groups is not None:
-        total, count, worst, worst_examples, by_pair = _crossing_classes(result, data, assignment)
+        total, count, worst, worst_examples, by_pair = _crossing_classes(result.groups, data, assignment)
     else:
         count, worst, worst_examples, by_pair = _crossing(result, data, assignment)
         total = len(result.pairs) if result else 0
@@ -172,7 +172,7 @@ def _check_similarity(
 
 
 def _crossing_classes(
-    result: Any,
+    groups: Sequence[Optional[str]],
     data: Dataset,
     assignment: Assignment,
 ) -> Tuple[int, int, Optional[float], List[Tuple[int, int, float]], Dict[str, int]]:
@@ -184,8 +184,8 @@ def _crossing_classes(
     """
     histogram: Dict[str, Dict[str, int]] = {}
     witness: Dict[str, Dict[str, int]] = {}
-    for index in sorted(range(len(result.groups)), key=lambda i: data.ids[i]):
-        label = result.groups[index]
+    for index in sorted(range(len(groups)), key=lambda i: data.ids[i]):
+        label = groups[index]
         if label is None:
             continue
         fold = assignment.fold_of.get(index, DROPPED)
@@ -220,7 +220,7 @@ def _crossing_classes(
 
 
 def _crossing(
-    result: Optional[Any],
+    result: Optional[SimilarityResult],
     data: Dataset,
     assignment: Assignment,
 ) -> Tuple[int, Optional[float], List[Tuple[int, int, float]], Dict[str, int]]:
@@ -274,7 +274,7 @@ def _crossing(
 
 def _check_disjoint(constraint: DisjointConstraint, data: Dataset, assignment: Assignment) -> ConstraintReport:
     values = data.column(constraint.key)
-    spread: Dict[str, set] = {}
+    spread: Dict[str, set[str]] = {}
     bound = 0
     unbound = 0
     for i, value in enumerate(values):
@@ -432,7 +432,7 @@ def diagnostics(
             exact_max_n=exact_max_n,
             settings=constraint.settings,
         )
-        neighbours: Dict[int, Any] = {}
+        neighbours: Dict[int, Optional[Neighbour]] = {}
         column = data.column(key.column)
         for probe_queries, probe_targets in probes:
             neighbours.update(
@@ -476,7 +476,7 @@ def _distribution(values: Sequence[float]) -> Dict[str, Any]:
 
 
 def _nn_baseline(
-    neighbours: Dict[int, Any],
+    neighbours: Dict[int, Optional[Neighbour]],
     label_values: Sequence[Optional[str]],
     kind: str,
     queries: Sequence[int],

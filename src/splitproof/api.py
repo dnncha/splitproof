@@ -184,6 +184,11 @@ def load_assignment(
     split_path: Optional[Path] = None,
     allow_dropped: bool = False,
 ) -> Assignment:
+    if split_column is not None and split_path is not None:
+        raise DataError(
+            "two split sources given; choose one",
+            remedy="Pass either --split-column or --split.",
+        )
     if split_column:
         return assign_module.from_column(data, split_column, allow_dropped=allow_dropped)
     if split_path:

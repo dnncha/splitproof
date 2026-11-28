@@ -330,9 +330,9 @@ def _temporal_pins(
     policy: Policy,
     data: Dataset,
     groups: Dict[int, List[int]],
-) -> Tuple[Dict[int, str], int, set]:
+) -> Tuple[Dict[int, str], int, set[int]]:
     pins: Dict[int, str] = {}
-    dropped: set = set()
+    dropped: set[int] = set()
     spanning = 0
     if len(policy.temporal_constraints) > 1:
         raise PolicyError(

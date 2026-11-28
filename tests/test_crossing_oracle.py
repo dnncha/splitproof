@@ -47,8 +47,7 @@ def test_class_crossings_match_brute_force_enumeration(case):
     kept = [i for i in range(len(ids)) if labels[i] is not None and folds[i] != DROPPED]
     pairs = [(i, j) for i, j in combinations(kept, 2) if labels[i] == labels[j]]
     total, crossing, by_pair = _brute(pairs, folds)
-    result = SimpleNamespace(groups=labels)
-    got_total, got_count, worst, examples, got_by_pair = evaluate._crossing_classes(result, data, assignment)
+    got_total, got_count, worst, examples, got_by_pair = evaluate._crossing_classes(labels, data, assignment)
     assert (got_total, got_count, got_by_pair) == (total, len(crossing), dict(sorted(by_pair.items())))
     assert worst == (1.0 if crossing else None)
     assert len(examples) <= evaluate.MAX_EXAMPLES

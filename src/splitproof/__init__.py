@@ -1,6 +1,6 @@
 __version__ = "0.1.0"
 
-from .errors import (  # noqa: E402
+from .errors import (
     BackendFailed,
     BackendUnavailable,
     CertificateMismatch,
@@ -12,8 +12,10 @@ from .errors import (  # noqa: E402
     PolicyError,
     VacuousConstraint,
 )
-from .sim import TooManyPairs  # noqa: E402
-from .policy import Policy  # noqa: E402
+from .sim import TooManyPairs
+from .policy import Policy
+
+from .api import Outcome as Outcome, audit, make_split, verify
 
 __all__ = [
     "__version__",
@@ -33,11 +35,3 @@ __all__ = [
     "make_split",
     "verify",
 ]
-
-
-def __getattr__(name: str):
-    if name in {"make_split", "audit", "verify", "Outcome"}:
-        from . import api
-
-        return getattr(api, name)
-    raise AttributeError(f"module 'splitproof' has no attribute {name!r}")

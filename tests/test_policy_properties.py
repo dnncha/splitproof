@@ -221,3 +221,26 @@ def test_a_cutoff_is_read_the_same_way_on_every_python(cutoff):
     }
     with pytest.raises(PolicyError):
         Policy.from_dict(raw)
+
+
+@SETTINGS
+@given(st.floats(min_value=1e-20, max_value=1e-8))
+def test_small_positive_fractions_survive_the_certificate_round_trip(fraction: float) -> None:
+    payload = _set(BASE, ("scheme", "fractions"), {"train": 1.0 - fraction, "test": fraction})
+    policy = Policy.from_dict(payload)
+    embedded = Policy.from_dict(policy.to_dict())
+    assert embedded.scheme.fractions == policy.scheme.fractions
+
+
+def test_large_weights_normalise_without_overflow() -> None:
+    payload = _set(BASE, ("scheme", "fractions"), {"train": 1e308, "test": 1e308})
+    assert Policy.from_dict(payload).scheme.fractions == {"train": 0.5, "test": 0.5}
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_integer_backend_setting_has_a_domain_error(value: float) -> None:
+    from splitproof.errors import BackendUnavailable
+    from splitproof.sim import resolve
+
+    with pytest.raises(BackendUnavailable, match=r"exact_jaccard\.k must be a whole number"):
+        resolve("kmer_jaccard", "text", 2, settings={"k": value})

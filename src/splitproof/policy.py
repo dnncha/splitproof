@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import datetime as _dt
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from .sim import SettingValue
 
 from .digest import canonical
 from .isodate import calendar_day
@@ -70,7 +73,7 @@ def _as_float(value: Any, where: str) -> float:
         )
     try:
         number = float(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise PolicyError(
             f"{where} must be a number, got {value!r}",
             details={"where": where, "value": str(value)},
@@ -165,11 +168,11 @@ class SimilarityConstraint:
     metric: str
     threshold: float
     backend: Optional[str] = None
-    params: Tuple[Tuple[str, Any], ...] = ()
+    params: Tuple[Tuple[str, SettingValue], ...] = ()
     kind: str = "similarity"
 
     @property
-    def settings(self) -> Dict[str, Any]:
+    def settings(self) -> Dict[str, SettingValue]:
         return dict(self.params)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -222,7 +225,7 @@ class TemporalConstraint:
         )
 
 
-Constraint = Any
+Constraint = SimilarityConstraint | DisjointConstraint | TemporalConstraint
 
 DROPPED = "__dropped__"
 UNASSIGNED = "__unassigned__"
@@ -249,7 +252,7 @@ class Scheme:
     def to_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {"kind": self.kind}
         if self.fractions:
-            out["fractions"] = {k: round(float(v), 10) for k, v in sorted(self.fractions.items())}
+            out["fractions"] = dict(sorted(self.fractions.items()))
         if self.folds:
             out["folds"] = self.folds
         return out
@@ -311,7 +314,7 @@ class Scheme:
                     f"scheme.fractions.{name} must be positive",
                     details={"where": f"{where}.fractions.{name}", "value": value},
                 )
-        total = sum(fractions.values())
+        total = sum(fractions[name] for name in sorted(fractions))
         if abs(total - 1.0) > 1e-6:
             if all(value < 1.0 for value in fractions.values()):
                 raise PolicyError(
@@ -322,7 +325,17 @@ class Scheme:
                     ),
                     details={"where": f"{where}.fractions", "sum": total},
                 )
-            fractions = {k: v / total for k, v in fractions.items()}
+            if not math.isfinite(total):
+                largest = max(fractions.values())
+                fractions = {name: weight / largest for name, weight in fractions.items()}
+                total = sum(fractions[name] for name in sorted(fractions))
+            fractions = {name: weight / total for name, weight in fractions.items()}
+            if any(fraction == 0.0 for fraction in fractions.values()):
+                raise PolicyError(
+                    "scheme.fractions contains weights whose ratio is too small to represent",
+                    remedy="Use weights whose normalised fractions remain positive.",
+                    details={"where": f"{where}.fractions"},
+                )
         return Scheme(kind=kind, fractions=fractions)
 
 
@@ -407,7 +420,7 @@ class Policy:
         }
 
     @staticmethod
-    def from_dict(raw: Dict[str, Any], *, source_path: Optional[Path] = None) -> "Policy":
+    def from_dict(raw: object, *, source_path: Optional[Path] = None) -> "Policy":
         if not isinstance(raw, dict):
             raise PolicyError("policy must be a mapping at the top level")
         version = _as_int(raw.get("splitproof", POLICY_VERSION), "policy.splitproof")
@@ -450,13 +463,14 @@ class Policy:
         return Policy.from_dict(_parse_structured(text, path), source_path=Path(path))
 
 
-def _parse_structured(text: str, path: Path) -> Dict[str, Any]:
+def _parse_structured(text: str, path: Path) -> object:
     suffix = Path(path).suffix.lower()
     if suffix == ".json":
         import json
 
         try:
-            return json.loads(text)
+            loaded: object = json.loads(text)
+            return loaded
         except json.JSONDecodeError as exc:
             raise PolicyError(
                 f"policy file {path} is not valid JSON",
@@ -592,7 +606,7 @@ def _parse_similarity(item: Dict[str, Any], where: str, dataset: DatasetSpec) ->
             )
     backend = _as_text(item["backend"], f"{where}.backend") if item.get("backend") else None
     params_raw = _as_mapping(item.get("params") or {}, f"{where}.params")
-    params: Dict[str, Any] = {}
+    params: Dict[str, SettingValue] = {}
     for name, value in params_raw.items():
         label = _as_text(name, f"{where}.params")
         if isinstance(value, bool) or not isinstance(value, (int, float, str)):

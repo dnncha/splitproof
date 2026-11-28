@@ -62,3 +62,24 @@ def test_bad_input_is_a_structured_error_with_the_error_exit_code(tmp_path, caps
     captured = capsys.readouterr()
     assert code == cli.EXIT_ERROR, captured
     assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize("command", ["audit", "verify"])
+def test_split_source_must_be_unambiguous(tmp_path, capsys, command):
+    data = write_csv(tmp_path / "d.csv", make_rows(families=6, members=3, seed=5))
+    policy = _policy(tmp_path, data, exact=True)
+    split = tmp_path / "s.csv"
+    certificate = tmp_path / "c.json"
+    code, _ = _run(capsys, [
+        "split", str(policy), "--out", str(split), "--cert", str(certificate),
+        "--no-neighbours", "--json",
+    ])
+    assert code == cli.EXIT_OK
+    source = policy if command == "audit" else certificate
+    code, payload = _run(capsys, [
+        command, str(source), "--data", str(data), "--split", str(split),
+        "--split-column", "family", "--no-neighbours", "--json",
+    ])
+    assert code == cli.EXIT_ERROR
+    assert payload["error"]["code"] == "DATA_INVALID"
+    assert "choose one" in payload["error"]["message"]

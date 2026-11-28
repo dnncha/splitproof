@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .evaluate import SATISFIED, SATISFIED_UNPROVEN, VIOLATED
 
@@ -80,7 +80,7 @@ def _unconstrained(certificate: Dict[str, Any]) -> int:
     return total
 
 
-def _worst_neighbour(certificate: Dict[str, Any]):
+def _worst_neighbour(certificate: Dict[str, Any]) -> Optional[Tuple[str, float, Optional[int], Optional[int]]]:
     best = None
     for key, entry in (certificate.get("diagnostics", {}).get("keys") or {}).items():
         distribution = entry.get("nearest_reference_similarity") or {}

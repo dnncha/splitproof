@@ -4,12 +4,14 @@ import bisect
 import hashlib
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from .dataset import Dataset
 from .errors import DataError
 from .errors import GiantUnit, InfeasibleSplit
-from .policy import DROPPED, MAX_FOLDS, UNASSIGNED, Policy
+from .policy import DROPPED as DROPPED
+from .policy import MAX_FOLDS, Policy
+from .policy import UNASSIGNED as UNASSIGNED
 from .units import Unit, UnitGraph
 
 
@@ -558,7 +560,7 @@ def describe(policy: Policy, data: Dataset, assignment: Assignment, graph: UnitG
     return stats
 
 
-def fold_order(name: str) -> Tuple[Any, ...]:
+def fold_order(name: str) -> Tuple[Tuple[int | str, ...], str]:
     """Natural ordering, so fold2 sorts before fold10.
 
     assign() creates folds in integer order while a fold column is read back
@@ -566,7 +568,8 @@ def fold_order(name: str) -> Tuple[Any, ...]:
     certificate once there were more than ten folds.
     """
     parts = re.split(r"(\d+)", name)
-    return tuple(int(part) if part.isdigit() else part for part in parts) + (name,)
+    tokens = tuple(int(part) if index % 2 else part for index, part in enumerate(parts))
+    return tokens, name
 
 
 

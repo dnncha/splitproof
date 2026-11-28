@@ -253,3 +253,19 @@ def test_fasta_sequence_before_any_header_is_refused(tmp_path):
     with pytest.raises(DataError) as error:
         dataset_module.load(path, "id")
     assert error.value.details["line"] == 1
+
+
+def test_parquet_and_csv_produce_the_same_normalised_dataset(tmp_path: Path) -> None:
+    pa = pytest.importorskip("pyarrow")
+    pq = pytest.importorskip("pyarrow.parquet")
+    parquet = tmp_path / "data.parquet"
+    pq.write_table(pa.table({"id": ["a", "b", "c"], "group": ["NA", None, "group-2"]}), parquet)
+    csv_path = tmp_path / "data.csv"
+    csv_path.write_text("id,group\na,NA\nb,\nc,group-2\n", encoding="utf-8")
+
+    from splitproof.dataset import load
+
+    actual = load(parquet, "id")
+    expected = load(csv_path, "id")
+    assert actual.ids == expected.ids
+    assert actual.column("group") == expected.column("group")
