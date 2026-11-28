@@ -117,7 +117,7 @@ def _named_mapping(mapping: dict[object, object], where: str) -> dict[str, objec
         name = _as_text(key, where)
         if name in result:
             raise PolicyError(
-                f"duplicate name {name!r} in {where} after normalisation",
+                f"duplicate name {name!r} appears twice in {where} after normalisation",
                 details={"where": where, "name": name},
             )
         result[name] = value
